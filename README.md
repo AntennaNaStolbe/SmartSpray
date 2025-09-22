@@ -6,6 +6,11 @@ SmartSpray — это проект для управления мотором о
 
 ---
 
+## Видео работы освежителя
+<video src='https://github.com/AntennaNaStolbe/SmartSpray/blob/main/%D0%A0%D0%B0%D0%B1%D0%BE%D1%82%D0%B0.mov' width=180/>
+
+---
+
 ## ⚙ Требования
 - **Плата ESP8266** (например, NodeMCU, Wemos D1 Mini и т.п.)
 - **Драйвер для управления мотором TA6586** [Тык](https://www.chipdip.ru/product/ta6586-drayver-dvigatelya-iout-7a-dip-8-rz-9000663635)
