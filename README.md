@@ -7,7 +7,7 @@ SmartSpray — это проект для управления мотором о
 ---
 
 ## Видео работы освежителя
-
+https://github.com/user-attachments/assets/e8b85208-5a7e-4761-8341-9d37cfbdbc90
 
 ---
 
