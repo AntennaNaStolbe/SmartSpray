@@ -17,6 +17,7 @@ https://github.com/user-attachments/assets/e8b85208-5a7e-4761-8341-9d37cfbdbc90
 - **Освежитель воздуха AirWick** [Тык](https://market.yandex.ru/product--air-wick-aerozol-dikii-granat-avtomaticheskii-so-smennym-ballonom-250-ml/1779356002?sku=439482020&uniqueId=8530975&do-waremd5=rUQvalKJ0Glrsh-DDBF9-Q&ogV=-3)
 - **Home Assistant** с настроенным MQTT брокером
 - Arduino IDE для прошивки микроконтроллера
+- Источник питания 5v. Можно сделать и с аккумулятором/батарейками, но wi-fi довольно прожорливый по питанию, по этому в простое это довольно не долговечно
 
 ---
 
@@ -58,6 +59,9 @@ const char* mqtt_pass = "PassWord";      // Пароль
 
 // Топик, по которому принимаются команды
 const char* mqtt_topic_sub = "home-assistant/airfreshener/trigger";
+
+// Скорость работы мотора. Подстраивается подбором, так как каждый освежитель имеет свой люфт в механизме. Необходимо подобрать минимальное значение от 0 до 255, при котором хватает мощности для распыления
+int motorPower = 150;
 ```
 
 ---
