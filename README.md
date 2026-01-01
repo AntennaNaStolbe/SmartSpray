@@ -48,15 +48,18 @@ https://github.com/user-attachments/assets/e8b85208-5a7e-4761-8341-9d37cfbdbc90
 Перед прошивкой в файле `.ino` укажите свои параметры:
 
 ```cpp
-// Настройки Wi-Fi
-const char* ssid = "WIFIname";       // Имя вашей сети Wi-Fi
-const char* password = "WIFIpassword"; // Пароль Wi-Fi
+// Wi-Fi
+const char* ssid     = "WiFiName";
+const char* password = "WiFiPass";
 
-// Настройки MQTT
-const char* mqtt_server = "192.168.1.1"; // IP-адрес MQTT сервера
-const int mqtt_port = 1883;              // Порт MQTT (по умолчанию 1883)
-const char* mqtt_user = "mqttuser";      // Логин MQTT
-const char* mqtt_pass = "PassWord";      // Пароль MQTT
+// MQTT
+const char* mqtt_server = "192.168.1.3";
+const int   mqtt_port   = 1883;
+const char* mqtt_user   = "mqttuser";
+const char* mqtt_pass   = "mqttpass";
+
+// ====== DEVICE ID ======
+String device_id = "spray_bathroom";
 
 // Скорость работы мотора. Подстраивается подбором, так как каждый освежитель имеет свой люфт в механизме.
 // Необходимо подобрать минимальное значение от 0 до 255, при котором хватает мощности для распыления.
