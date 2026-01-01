@@ -2,128 +2,127 @@
 #include <PubSubClient.h>
 #include <GyverMotor.h>
 
-// ==== Настройки Wi-Fi ====
-const char* ssid = "WIFIname"; //Имя вашей сети WIFI
-const char* password = "WIFIpassword"; // Пароль вашей сети WIFI
+// ================= DEBUG =================
+#define DEBUG_MODE 1
 
-// ==== Настройки MQTT ====
-const char* mqtt_server = "192.168.1.1"; // Адрес MQTT Сервера
-const int mqtt_port = 1883; // Порт MQTT сервера
-const char* mqtt_user = "mqttuser"; // Логин пользователя вашего mqtt сервера
-const char* mqtt_pass = "PassWord"; // Пароль пользователя вашего mqtt сервера
+#if DEBUG_MODE
+  #define DEBUG_PRINT(x) Serial.print(x)
+  #define DEBUG_PRINTLN(x) Serial.println(x)
+  #define DEBUG_PRINTF(...) Serial.printf(__VA_ARGS__)
+#else
+  #define DEBUG_PRINT(x)
+  #define DEBUG_PRINTLN(x)
+  #define DEBUG_PRINTF(...)
+#endif
 
-// ==== Топики MQTT ====
-const char* mqtt_topic_command = "ans/smartspray/trigger";
-const char* mqtt_topic_availability = "ans/smartspray/availability";
-const char* mqtt_discovery_topic = "homeassistant/button/smartspray_spray/config";
+// ================= НАСТРОЙКИ =================
 
-const char* mqtt_discovery_payload =
-  "{"
-    "\"name\":\"spraying\","
-    "\"unique_id\":\"ans_smartSpray_trigger\","
-    "\"command_topic\":\"ans/smartspray/trigger\","
-    "\"payload_press\":\"SPRAY\","
-    "\"availability_topic\":\"ans/smartspray/availability\","
-    "\"payload_available\":\"online\","
-    "\"payload_not_available\":\"offline\","
-    "\"icon\":\"mdi:spray\","
-    "\"device\":{"
-      "\"identifiers\":[\"ans_smartSpray\"],"
-      "\"name\":\"SmartSpray\","
-      "\"manufacturer\":\"AntennaNS\","
-      "\"model\":\"ESP8266 SmartSpray v2\""
-    "}"
-  "}";
+// Wi-Fi
+const char* ssid     = "WiFiName";
+const char* password = "WiFiPass";
 
+// MQTT
+const char* mqtt_server = "192.168.1.3";
+const int   mqtt_port   = 1883;
+const char* mqtt_user   = "mqttuser";
+const char* mqtt_pass   = "mqttpass";
 
-int motorPower = 188; // Скорость мотора (по сути регулируется мощность нажима на распылитель балона) 0-255
+// ====== DEVICE ID ======
+String device_id = "spray_bathroom";
 
+// ================= MQTT БУФЕРЫ =================
+char mqtt_topic_command[128];
+char mqtt_topic_availability[128];
+char mqtt_discovery_topic[128];
+char mqtt_discovery_payload[512];
+
+// ================= ДРУГОЕ =================
+int motorPower = 188;
 bool isMotorRun = false;
 
-// ==== Пины ====
+// Пины
 #define DIG_PIN D2
 #define PWM_PIN D1
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-
-// Инициализация мотора
 GMotor motor(DRIVER2WIRE, DIG_PIN, PWM_PIN, HIGH);
 
-// ==== Функция распыления ====
+// ================= SPRAY =================
 void spray() {
+  if (isMotorRun) {
+    DEBUG_PRINTLN("[SPRAY] Уже выполняется, игнор");
+    return;
+  }
+
+  DEBUG_PRINTLN("[SPRAY] Запуск распыления");
   isMotorRun = true;
-  Serial.println("Запуск spray()");
-  motor.setSpeed(motorPower - 40);
-  delay(70);
-  motor.setSpeed(motorPower - 30);
-  delay(70);
-  motor.setSpeed(motorPower - 20);
-  delay(70);
-  motor.setSpeed(motorPower - 10);
-  delay(70);
-  motor.setSpeed(motorPower);
-  delay(400);
+
+  motor.setSpeed(motorPower - 40); delay(70);
+  motor.setSpeed(motorPower - 30); delay(70);
+  motor.setSpeed(motorPower - 20); delay(70);
+  motor.setSpeed(motorPower - 10); delay(70);
+  motor.setSpeed(motorPower);      delay(400);
   motor.setSpeed(0);
+
   isMotorRun = false;
+  DEBUG_PRINTLN("[SPRAY] Завершено");
 }
 
-// ==== Подключение к Wi-Fi ====
+// ================= WIFI =================
 void setup_wifi() {
-  delay(10);
-  Serial.print("Подключение к Wi-Fi: ");
-  Serial.println(ssid);
+  DEBUG_PRINTF("[WIFI] Подключение к %s\n", ssid);
 
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    DEBUG_PRINT(".");
   }
 
-  Serial.println("");
-  Serial.println("Wi-Fi подключен");
-  Serial.print("IP адрес: ");
-  Serial.println(WiFi.localIP());
+  DEBUG_PRINTLN("");
+  DEBUG_PRINTLN("[WIFI] Подключено");
+  DEBUG_PRINT("[WIFI] IP: ");
+  DEBUG_PRINTLN(WiFi.localIP());
 }
 
-// ==== Подключение к MQTT ====
+// ================= MQTT =================
 void reconnectMQTT() {
   while (!client.connected()) {
-    Serial.print("Подключение к MQTT...");
+
+    DEBUG_PRINTLN("[MQTT] Подключение...");
 
     if (client.connect(
-          "ESP8266_AirFreshener",
+          device_id.c_str(),           // client_id
           mqtt_user,
           mqtt_pass,
-          mqtt_topic_availability, // LWT topic
-          1,                        // QoS
-          true,                     // retain
-          "offline"                 // LWT payload
+          mqtt_topic_availability,     // LWT topic
+          1,
+          true,
+          "offline"
         )) {
 
-      Serial.println("Успешно");
+      DEBUG_PRINTLN("[MQTT] Подключено");
 
-      // Подписка
       client.subscribe(mqtt_topic_command);
-      Serial.print("Подписка на топик: ");
-      Serial.println(mqtt_topic_command);
+      DEBUG_PRINT("[MQTT] Подписка: ");
+      DEBUG_PRINTLN(mqtt_topic_command);
 
-      // Сообщаем, что мы online
       client.publish(mqtt_topic_availability, "online", true);
+      DEBUG_PRINTLN("[MQTT] Статус: online");
 
-      // Публикация MQTT Discovery (retain!)
       client.publish(mqtt_discovery_topic, mqtt_discovery_payload, true);
+      DEBUG_PRINTLN("[MQTT] Discovery опубликован");
 
     } else {
-      Serial.print("Ошибка подключения, код: ");
-      Serial.print(client.state());
-      Serial.println(". Повтор через 5 секунд");
+      DEBUG_PRINT("[MQTT] Ошибка, state=");
+      DEBUG_PRINTLN(client.state());
+      DEBUG_PRINTLN("[MQTT] Повтор через 5 сек");
       delay(5000);
     }
   }
 }
 
-// ==== Обработка входящих сообщений ====
+// ================= CALLBACK =================
 void callback(char* topic, byte* payload, unsigned int length) {
   String message;
 
@@ -131,27 +130,60 @@ void callback(char* topic, byte* payload, unsigned int length) {
     message += (char)payload[i];
   }
 
-  Serial.print("MQTT: ");
-  Serial.print(topic);
-  Serial.print(" -> ");
-  Serial.println(message);
+  DEBUG_PRINTF("[MQTT] %s -> %s\n", topic, message.c_str());
 
   if (String(topic) == mqtt_topic_command) {
-    if (message == "SPRAY" && !isMotorRun) {
+    if (message == "SPRAY") {
       spray();
+    } else {
+      DEBUG_PRINTLN("[MQTT] Неизвестная команда");
     }
   }
 }
 
+// ================= SETUP =================
 void setup() {
   Serial.begin(115200);
-  Serial.println("Запуск ESP8266 освежителя воздуха...");
+  DEBUG_PRINTLN("\n[BOOT] SmartSpray запускается");
 
-  analogWriteFreq(20000); // чтобы не пищал мотор
-  client.setBufferSize(512); // буфер PubSubClient. Без этого сообщение discovery тупо не уходит, не влезает :)
+  analogWriteFreq(20000);
+  client.setBufferSize(1024);
 
   motor.setMode(AUTO);
   motor.setSpeed(0);
+
+  // ---- Формирование топиков ----
+  String base = "antennans/SmartSpray/" + device_id;
+
+  (base + "/trigger").toCharArray(mqtt_topic_command, sizeof(mqtt_topic_command));
+  (base + "/availability").toCharArray(mqtt_topic_availability, sizeof(mqtt_topic_availability));
+
+  String discovery_topic =
+    "homeassistant/button/SmartSpray_" + device_id + "_trigger/config";
+  discovery_topic.toCharArray(mqtt_discovery_topic, sizeof(mqtt_discovery_topic));
+
+  // ---- Discovery payload ----
+  String payload =
+    "{"
+      "\"name\":\"Spraying\","
+      "\"unique_id\":\"SmartSpray_" + device_id + "_trigger\","
+      "\"command_topic\":\"" + base + "/trigger\","
+      "\"payload_press\":\"SPRAY\","
+      "\"availability_topic\":\"" + base + "/availability\","
+      "\"payload_available\":\"online\","
+      "\"payload_not_available\":\"offline\","
+      "\"icon\":\"mdi:spray\","
+      "\"device\":{"
+        "\"identifiers\":[\"SmartSpray_" + device_id + "\"],"
+        "\"name\":\"SmartSpray_" + device_id + "\","
+        "\"manufacturer\":\"AntennaNS\","
+        "\"model\":\"SmartSpray\""
+      "}"
+    "}";
+
+  payload.toCharArray(mqtt_discovery_payload, sizeof(mqtt_discovery_payload));
+
+  DEBUG_PRINTLN("[MQTT] Discovery payload сформирован");
 
   setup_wifi();
 
@@ -159,9 +191,13 @@ void setup() {
   client.setCallback(callback);
 }
 
+// ================= LOOP =================
 void loop() {
   if (!client.connected()) {
     reconnectMQTT();
   }
   client.loop();
 }
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <GyverMotor.h>
