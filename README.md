@@ -28,7 +28,7 @@ https://github.com/user-attachments/assets/e8b85208-5a7e-4761-8341-9d37cfbdbc90
 |-----------------------|------------|--------|
 | **ESP8266WiFi**       | Подключение ESP8266 к Wi-Fi сети | [GitHub](https://github.com/esp8266/Arduino) |
 | **PubSubClient**      | Работа с MQTT (отправка и получение сообщений) | [GitHub](https://github.com/knolleary/pubsubclient) |
-| **GyverMotor**        | Управление двигателем | [GitHub](https://github.com/AlexGyver/GyverMotor) |
+| **GyverMotor**        | Управление двигателем | [GitHub](https://github.com/GyverLibs/GyverMotor) |
 
 > ⚠️ Убедитесь, что все библиотеки установлены через **Library Manager** в Arduino IDE.
 
