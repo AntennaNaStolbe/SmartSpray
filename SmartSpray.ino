@@ -1,6 +1,6 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-#include <GyverMotor.h>
+#include <GyverMotor2.h>
 
 // ================= DEBUG =================
 #define DEBUG_MODE 1
@@ -46,7 +46,7 @@ bool isMotorRun = false;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-GMotor motor(DRIVER2WIRE, DIG_PIN, PWM_PIN, HIGH);
+GMotor2<DRIVER2WIRE> motor(DIG_PIN, PWM_PIN);
 
 // ================= SPRAY =================
 void spray() {
@@ -146,10 +146,10 @@ void setup() {
   Serial.begin(115200);
   DEBUG_PRINTLN("\n[BOOT] SmartSpray запускается");
 
-  analogWriteFreq(20000);
+  analogWriteRange(255); // Переводим ESP8266 в 8 битный режим. Требуется для библиотеки GyverMotor2
+  analogWriteFreq(20000); // Повышаем частоту шим. Чтобы не было писка при срабатывании
   client.setBufferSize(1024);
 
-  motor.setMode(AUTO);
   motor.setSpeed(0);
 
   // ---- Формирование топиков ----
@@ -198,6 +198,3 @@ void loop() {
   }
   client.loop();
 }
-#include <ESP8266WiFi.h>
-#include <PubSubClient.h>
-#include <GyverMotor.h>
