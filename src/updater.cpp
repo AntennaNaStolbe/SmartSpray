@@ -120,18 +120,10 @@ UpdateCheckResult updaterCheck() {
     return UPDATE_RESULT_ERROR;
   }
 
-  // Google/HTTPClient over WiFiClientSecure doesn't provide a working getStream();
-  // read the full body as a string and parse it (String reads in-place).
-  String body = http.getString();
-  http.end();
-  if (body.isEmpty()) {
-    DEBUG_PRINTLN("[UPD] Empty GitHub response");
-    return UPDATE_RESULT_ERROR;
-  }
-  DEBUG_PRINTF("[UPD] Response %d bytes, heap=%u\n", body.length(), ESP.getFreeHeap());
-
-  // Parse only needed fields via ArduinoJson filter: don't store the full JSON
-  // (body ~3.6KB + small doc fit in the ESP8266's scarce heap).
+  // Parse only needed fields via ArduinoJson filter, reading directly from the
+  // response stream (no full-body String held in RAM). The release JSON
+  // (~5KB) no longer fits the device heap via getString() — it pre-reserves the
+  // whole Content-Length up front and fails on the ESP8266's scarce heap.
   StaticJsonDocument<256> filter;
   filter["tag_name"] = true;
   JsonArray filterAssets = filter.createNestedArray("assets");
@@ -141,10 +133,11 @@ UpdateCheckResult updaterCheck() {
 
   DynamicJsonDocument doc(1536);
   DeserializationError err =
-      deserializeJson(doc, body, DeserializationOption::Filter(filter));
+      deserializeJson(doc, *http.getStreamPtr(), DeserializationOption::Filter(filter));
+  http.end();
 
   if (err) {
-    DEBUG_PRINTF("[UPD] JSON error: %s (doc=%d bytes, heap=%u)\n",
+    DEBUG_PRINTF("[UPD] GitHub stream parse error: %s (doc=%d bytes, heap=%u)\n",
                  err.c_str(), (int)doc.capacity(), ESP.getFreeHeap());
     return UPDATE_RESULT_ERROR;
   }
