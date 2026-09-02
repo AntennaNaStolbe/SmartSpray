@@ -157,6 +157,15 @@ UpdateCheckResult updaterInstall() {
   WiFiClientSecure dlClient;
   dlClient.setInsecure();
   dlClient.setTimeout(15);
+  // Same reduced TLS buffers as the update check: the default 16KB TLS buffer
+  // fails the handshake on the ESP8266's limited heap ("connection failed").
+  dlClient.setBufferSizes(8192, 512);
+  dlClient.setNoDelay(true);
+
+  // The GitHub releases/download/... URL 302-redirects to the actual asset
+  // host (release-assets.githubusercontent.com). ESP8266httpUpdate disables
+  // redirect follow by default, so enable it.
+  ESPhttpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   t_httpUpdate_return ret = ESPhttpUpdate.update(dlClient, availAssetUrl);
   switch (ret) {

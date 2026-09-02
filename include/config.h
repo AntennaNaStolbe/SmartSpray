@@ -21,7 +21,7 @@
 // ================= FIRMWARE VERSION =================
 // Compared with the GitHub release tag (e.g. "v3.0.0") for auto-update.
 // When releasing a new version — update here AND create a release with the same tag.
-#define FW_VERSION         "3.0.1"
+#define FW_VERSION         "3.0.2"
 #define FW_VERSION_PREFIX  "v"        // release tags are in "v3.0.0" format
 
 // ================= DEVICE ID =================
