@@ -65,8 +65,8 @@ WiFi and MQTT credentials are **not stored in the code** — they are entered th
 // Friendly display name (shown in HA / web UI), configurable via the web page.
 #define DEVICE_NAME_DEFAULT  "SmartSpray"
 
-// Firmware version — also the GitHub release tag for auto-update ("v3.0.2")
-#define FW_VERSION "3.0.2"
+// Firmware version — also the GitHub release tag for auto-update ("v3.0.3")
+#define FW_VERSION "3.0.3"
 
 // Motor speed. Tuned by trial, since each freshener has its own mechanical play.
 // The default (188) usually works.
