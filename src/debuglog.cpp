@@ -3,8 +3,11 @@
 
 // ---- Ring buffer of strings ----
 // Size is a tradeoff: enough for the log window, doesn't eat ESP8266 heap.
-#define LOG_MAX_LINES 40     // how many recent lines to keep
-#define LOG_MAX_LEN   100    // max length of a single line
+// Kept small: it sits in .bss, and every byte here lowers the heap ceiling -
+// which is critical for the GitHub HTTPS firmware download (needs ~16.7KB TLS
+// recv buffer + 6.2KB BearSSL stack on a ~30KB free heap).
+#define LOG_MAX_LINES 20     // how many recent lines to keep
+#define LOG_MAX_LEN   80     // max length of a single line
 
 static char logLines[LOG_MAX_LINES][LOG_MAX_LEN];
 static int logWriteIdx = 0;   // where to write the next line

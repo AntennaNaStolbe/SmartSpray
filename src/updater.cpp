@@ -4,6 +4,7 @@
 #include "mqtt.h"
 #include "webserver.h"
 #include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
 #include <ESP8266httpUpdate.h>
 #include <ArduinoJson.h>
 
@@ -165,35 +166,142 @@ const char *updaterLastResult() {
   return installResult;
 }
 
+// Resolves the browser_download_url (github.com -> 302) to the DIRECT CDN URL.
+// Uses a small TLS buffer (the 302 response is tiny), because following the
+// redirect inside the big-buffer download client would hold TWO 16.7KB recv
+// buffers (github.com + CDN host) at once and never fit the heap.
+static String githubDirectAssetUrl() {
+  WiFiClientSecure c;
+  c.setInsecure();
+  c.setTimeout(15);
+  c.setBufferSizes(8192, 512);
+  c.setNoDelay(true);
+  HTTPClient h;
+  if (!h.begin(c, availAssetUrl)) {
+    DEBUG_PRINTLN("[UPD] Resolve: failed to start HTTP");
+    return "";
+  }
+  const char *keys[] = {"Location"};
+  h.collectHeaders(keys, 1);
+  h.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+  int code = h.GET();
+  String loc = h.header("Location");
+  h.end();
+  if (code != HTTP_CODE_FOUND && code != HTTP_CODE_MOVED_PERMANENTLY) {
+    DEBUG_PRINTF("[UPD] Resolve: expected 302, got %d\n", code);
+    return "";
+  }
+  if (!loc.startsWith("https://")) {
+    DEBUG_PRINTLN("[UPD] Resolve: bad Location header");
+    return "";
+  }
+  DEBUG_PRINTF("[UPD] Direct asset URL: %s", loc.c_str());
+  return loc;
+}
+
 // Installs a previously found firmware update.
-// The firmware BYTES are pulled over plain HTTP from gSettings.update_url:
-// GitHub's CDN sends full-size (16KB) TLS records that BearSSL on this device
-// cannot buffer (recv buffer must be >= record size, but a 16KB buffer doesn't
-// fit the heap together with the 6.2KB BearSSL stack). Plain HTTP has no such
-// limit and streams straight into flash with a small buffer.
+// By default the firmware BYTES are downloaded straight from GitHub (the
+// release asset) over TLS. GitHub's asset CDN sends full-size (~16.4KB) TLS
+// records, so BearSSL needs the maximum receive buffer (16384 + 325 overhead =
+// 16709B); anything smaller stalls the stream. That buffer + the 6.2KB BearSSL
+// thunk stack only just fit the heap, and only because the install is deferred
+// (web server + MQTT stopped first, see updaterRunInstall) and the direct CDN
+// URL is resolved with a cheap small-buffer request beforehand (a redirect
+// inside the big-buffer client would double the recv-buffer peak).
+// gSettings.update_url is an optional override pointing at a plain-HTTP LAN
+// host (kept for local installs; default empty = GitHub).
 UpdateCheckResult updaterInstall() {
   if (!availAvailable || availAssetUrl.isEmpty()) {
     DEBUG_PRINTLN("[UPD] No found update to install");
     return UPDATE_RESULT_ERROR;
   }
-  if (gSettings.update_url[0] == '\0') {
-    DEBUG_PRINTLN("[UPD] No update_url configured - set it to a plain HTTP URL of the .bin, "
-                  "or install manually via web OTA");
-    return UPDATE_RESULT_ERROR;
-  }
-  if (!String(gSettings.update_url).startsWith("http://")) {
-    DEBUG_PRINTLN("[UPD] update_url must start with http:// (plain HTTP)");
-    return UPDATE_RESULT_ERROR;
+
+  String url = availAssetUrl;
+  bool useGithub = (gSettings.update_url[0] == '\0');
+  if (!useGithub) {
+    url = String(gSettings.update_url);
+    if (!url.startsWith("http://")) {
+      DEBUG_PRINTLN("[UPD] update_url must start with http:// (plain HTTP)");
+      return UPDATE_RESULT_ERROR;
+    }
   }
 
-  DEBUG_PRINTF("[UPD] Starting update from %s\n", gSettings.update_url);
-
-  // Free heap and stop MQTT so the device gives the download a quiet run.
+  // The web server is already stopped by updaterRunInstall(); drop MQTT too so
+  // the TLS download gets the biggest possible heap.
   mqttDisconnect();
+  DEBUG_PRINTF("[UPD] heap before download: %u\n", ESP.getFreeHeap());
 
-  DEBUG_PRINTF("[UPD] heap before download: %d\n", ESP.getFreeHeap());
-  WiFiClient tcpClient;   // plain HTTP: no TLS -> tiny heap, no record-size limits
-  t_httpUpdate_return ret = ESPhttpUpdate.update(tcpClient, String(gSettings.update_url));
+  // Order matters a lot here. Constructing a WiFiClientSecure pulls in the
+  // 6.2KB BearSSL stack, and holding one while resolving the CDN URL leaves the
+  // heap too fragmented for the ~16.7KB receive buffer ("Unable to allocate
+  // memory for SSL structures"). So: use a plain client by default, resolve +
+  // defrag, and only then build the big secure client.
+  WiFiClient plainClient;
+  WiFiClient *client = &plainClient;
+  WiFiClientSecure tlsClient;
+
+  if (useGithub) {
+    DEBUG_PRINTLN("[UPD] Installing from GitHub (TLS)");
+    String direct = githubDirectAssetUrl();
+    if (direct.isEmpty()) {
+      DEBUG_PRINTLN("[UPD] Could not resolve the direct asset URL");
+      return UPDATE_RESULT_ERROR;
+    }
+    url = direct;
+
+    // Coalesce the heap: grab the largest free block and release it so the
+    // BearSSL receive buffer gets a contiguous ~17KB region. Repeat in case a
+    // release frees up something adjacent.
+    size_t warm = ESP.getFreeHeap() - 4096;
+    for (int pass = 0; pass < 2; pass++) {
+      void *defrag = warm > 0 ? malloc(warm) : (void*)0;
+      if (defrag) free(defrag);
+      if (ESP.getMaxFreeBlockSize() >= 17000) break;
+    }
+    if (ESP.getMaxFreeBlockSize() < 17000) {
+      DEBUG_PRINTF("[UPD] Heap too fragmented for TLS (%u free, %u max block)",
+                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
+      return UPDATE_RESULT_ERROR;
+    }
+
+    // Maximum BearSSL receive buffer. The CDN sends records just over 16KB;
+    // the maximum settable (16384) + BearSSL overhead (325B) = 16709B covers
+    // them - but a smaller buffer stalls the TLS stream.
+    tlsClient.setInsecure();
+    tlsClient.setTimeout(30);
+    tlsClient.setBufferSizes(16384, 512);
+    tlsClient.setNoDelay(true);
+    client = &tlsClient;
+
+    // Pre-flight handshake to the CDN host. Empirically required: a fresh
+    // big-buffer download right after resolving can fail with "connection
+    // failed (-1)"; priming the DNS + socket + TLS to the same CDN edge first
+    // makes the download reliable.
+    String host = direct;
+    if (host.startsWith("https://")) host.remove(0, 8);
+    int slash = host.indexOf('/');
+    if (slash >= 0) host.remove(slash);
+    char hostBuf[96];
+    host.toCharArray(hostBuf, sizeof(hostBuf));
+
+    WiFiClientSecure pre;
+    pre.setInsecure();
+    pre.setTimeout(15);
+    pre.setBufferSizes(16384, 512);
+    pre.setNoDelay(true);
+    int rc = pre.connect(hostBuf, 443);
+    char serr[96] = "";
+    pre.getLastSSLError(serr, sizeof(serr));
+    pre.stop();
+    if (rc != 1) {
+      DEBUG_PRINTF("[UPD] TLS pre-flight failed (%d) \"%s\"", rc, serr);
+      return UPDATE_RESULT_ERROR;
+    }
+    DEBUG_PRINTF("[UPD] TLS pre-flight OK (%s)", hostBuf);
+  }
+
+  DEBUG_PRINTF("[UPD] Starting update from %s\n", url.c_str());
+  t_httpUpdate_return ret = ESPhttpUpdate.update(*client, url);
   switch (ret) {
     case HTTP_UPDATE_OK:
       DEBUG_PRINTLN("[UPD] Updated! Rebooting...");
