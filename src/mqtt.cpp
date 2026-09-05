@@ -103,7 +103,7 @@ static void callback(char* topic, byte* payload, unsigned int length) {
       updaterCheck();
       mqttPublishDeviceInfo();
     } else if (message == "UPDATE") {
-      updaterInstall();
+      updaterRequestInstall();
     } else if (message == "STATUS") {
       mqttPublishStatus();
     } else {
@@ -201,4 +201,9 @@ void mqttLoop() {
 
 bool mqttConnected() {
   return client.connected();
+}
+
+void mqttDisconnect() {
+  client.disconnect();       // closes the socket + frees the memory
+  client.setBufferSize(0);   // drop the PubSubClient buffer
 }

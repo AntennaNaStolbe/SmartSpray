@@ -67,6 +67,9 @@ static const char HTML_CONFIG[] PROGMEM =
 "</div>"
 "<input type=\"text\" id=\"user\" placeholder=\"Username (optional)\" autocomplete=\"off\">"
 "<input type=\"password\" id=\"mqtt_pass\" placeholder=\"Password (optional)\" autocomplete=\"off\">"
+"<div class=\"section\">Firmware Updates</div>"
+"<input type=\"text\" id=\"updateUrl\" placeholder=\"http://host/SmartSpray.bin (optional)\" autocomplete=\"off\">"
+"<div class=\"note2\">Plain HTTP URL to the .bin. Replaces the manual drag &amp; drop upload. Leave empty to disable auto-install (manual web OTA only).</div>"
 "<div class=\"section\">Web Interface Access</div>"
 "<label class=\"auth-toggle\"><input type=\"checkbox\" id=\"webAuth\" checked> Require a password for the web interface</label>"
 "<input type=\"text\" id=\"webUser\" placeholder=\"Username (e.g. admin)\" autocomplete=\"off\">"
@@ -101,6 +104,7 @@ static const char HTML_CONFIG[] PROGMEM =
 "mqtt_port:parseInt(document.getElementById('port').value)||1883,"
 "mqtt_user:document.getElementById('user').value,"
 "mqtt_pass:document.getElementById('mqtt_pass').value,"
+"update_url:document.getElementById('updateUrl').value,"
 "web_user:document.getElementById('webUser').value,"
 "web_pass:document.getElementById('webPass').value,"
 "web_auth_enabled:webAuthBox.checked?1:0})});"
@@ -397,18 +401,12 @@ static void wbCheckUpdate() {
 
 // POST /api/update - install the found update
 static void wbUpdate() {
-  switch (updaterInstall()) {
-    case UPDATE_RESULT_OK:
-      server.send(200, "text/plain", "Update installed. Rebooting...");
-      break;
-    case UPDATE_RESULT_NO_UPDATES:
-      mqttPublishDeviceInfo();
-      server.send(200, "text/plain", "No update required");
-      break;
-    case UPDATE_RESULT_ERROR:
-    default:
-      server.send(500, "text/plain", "No available update or install error");
-      break;
+  // Just set a flag; the real download runs from loop() after we respond, so
+  // web handling stays responsive and the download runs in a quiet context.
+  if (updaterRequestInstall()) {
+    server.send(200, "text/plain", "Update started...");
+  } else {
+    server.send(500, "text/plain", "No available update");
   }
 }
 
@@ -450,6 +448,9 @@ static void wbConfigSave() {
   // Web auth for the web interface (working mode)
   strncpy(s.web_user, doc["web_user"] | "", SETTINGS_WEB_USER_MAX - 1);
   strncpy(s.web_pass, doc["web_pass"] | "", SETTINGS_WEB_PASS_MAX - 1);
+
+  // Plain-HTTP firmware URL (empty = manual web OTA only).
+  strncpy(s.update_url, doc["update_url"] | "", SETTINGS_UPDATE_URL_MAX - 1);
   uint8_t webAuth = doc["web_auth_enabled"] | 0;
   if (webAuth) {
     // Auth enabled: username and password required, password not shorter than minimum.
@@ -596,4 +597,10 @@ void webInitSta() {
 void webLoop() {
   server.handleClient();
   dnsServer.processNextRequest();
+}
+
+void webStop() {
+  server.close();
+  dnsServer.stop();
+  DEBUG_PRINTF("[WEB] Server stopped, heap=%d\n", ESP.getFreeHeap());
 }

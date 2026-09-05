@@ -24,10 +24,22 @@ UpdateCheckResult updaterCheck();
 // On success the device reboots. Returns UPDATE_RESULT_OK/NO_UPDATES/ERROR.
 UpdateCheckResult updaterInstall();
 
+// Request installing the found update. Sets an internal flag only; the actual
+// download happens later from the main loop (outside the web/MQTT request
+// handler) via updaterRunInstall().
+bool updaterRequestInstall();
+// If an install was requested, runs it now (download, flash). Called from
+// loop(). Returns true if a request was processed.
+bool updaterRunInstall();
+
 // Whether a new version has been found but not yet installed.
 bool updaterAvailable();
 
 // Latest release version (for display), empty string if not found.
 const String &updaterLatestVersion();
+
+// Human-readable outcome of the most recent install attempt ("", "OK",
+// "installing...", or an error string).
+const char *updaterLastResult();
 
 #endif

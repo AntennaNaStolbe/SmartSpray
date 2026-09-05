@@ -4,7 +4,7 @@
 #include <EEPROM.h>
 
 // EEPROM range for config (ESP8266 emulates up to 4KB).
-#define EEPROM_SIZE      512
+#define EEPROM_SIZE      1024
 #define EEPROM_CONFIG_OFFSET  0
 
 static bool eepromReady = false;
@@ -39,6 +39,24 @@ struct AppSettingsPrev {
   char web_user[SETTINGS_WEB_USER_MAX];
   char web_pass[SETTINGS_WEB_PASS_MAX];
   uint8_t web_auth_enabled;
+};
+
+// Previous AppSettings layout (before the "update_url" field was added),
+// magic = SETTINGS_MAGIC_PREV2.
+struct AppSettingsPrev2 {
+  uint32_t magic;
+  char wifi_ssid[SETTINGS_WIFI_SSID_MAX];
+  char wifi_pass[SETTINGS_WIFI_PASS_MAX];
+  char mqtt_host[SETTINGS_MQTT_HOST_MAX];
+  uint16_t mqtt_port;
+  char mqtt_user[SETTINGS_MQTT_USER_MAX];
+  char mqtt_pass[SETTINGS_MQTT_PASS_MAX];
+  uint8_t motor_power;
+  uint8_t auto_update_enabled;
+  char web_user[SETTINGS_WEB_USER_MAX];
+  char web_pass[SETTINGS_WEB_PASS_MAX];
+  uint8_t web_auth_enabled;
+  char name[SETTINGS_NAME_MAX];
 };
 
 void settingsInit() {
@@ -78,6 +96,8 @@ static void settingsNormalize(AppSettings &s) {
   if (s.name[0] == '\0') {
     strncpy(s.name, DEVICE_NAME_DEFAULT, SETTINGS_NAME_MAX - 1);
   }
+  // Null-terminate the update URL (empty = manual web OTA only).
+  s.update_url[SETTINGS_UPDATE_URL_MAX - 1] = '\0';
 }
 
 bool settingsLoad(AppSettings &s) {
@@ -115,8 +135,20 @@ bool settingsLoad(AppSettings &s) {
     EEPROM.get(EEPROM_CONFIG_OFFSET, prev);
     s.magic = SETTINGS_MAGIC;
     s.name[0] = '\0';   // back to default
+    s.update_url[0] = '\0';
     // All other fields are at identical offsets; keep them as-is.
     // Save immediately in the new layout.
+    settingsSave(s);
+  }
+
+  // Previous config (before the "update_url" field): migrate, preserving
+  // everything. The update URL is empty by default (web OTA only).
+  if (s.magic == SETTINGS_MAGIC_PREV2) {
+    AppSettingsPrev2 prev;
+    EEPROM.get(EEPROM_CONFIG_OFFSET, prev);
+    s.magic = SETTINGS_MAGIC;
+    s.update_url[0] = '\0';
+    // All other fields are at identical offsets; keep them as-is.
     settingsSave(s);
   }
 

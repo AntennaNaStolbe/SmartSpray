@@ -13,19 +13,21 @@
 #define SETTINGS_WEB_PASS_MAX   64
 #define SETTINGS_WEB_PASS_MIN   4
 #define SETTINGS_NAME_MAX       32
+#define SETTINGS_UPDATE_URL_MAX 128   // plain-HTTP URL for firmware downloads
 
 // Magic number to validate the saved config.
 // VERSION: when AppSettings fields change, increment so old configs
 // (with a different layout) are not read as valid.
-#define SETTINGS_MAGIC  0x53505233   // "SPR3"
+#define SETTINGS_MAGIC  0x53505234   // "SPR4"
 
-// Magic number of the previous AppSettings layout (before the "name" field
-// was added). Used for automatic migration of the saved config without re-setup.
-#define SETTINGS_MAGIC_PREV  0x53505232   // "SPR2"
-
-// Magic number of the old AppSettings layout (before web auth was added).
-// Used for automatic migration of the saved config without re-setup.
-#define SETTINGS_MAGIC_OLD  0x53505231   // "SPR1"
+// Magic numbers of previous AppSettings layouts, used for automatic migration
+// of the saved config without re-setup:
+//   SETTINGS_MAGIC_OLD  = SPR1: before web auth was added
+//   SETTINGS_MAGIC_PREV = SPR2: after web auth, before the "name" field
+//   SETTINGS_MAGIC_PREV2 = SPR3: after "name", before the "update_url" field
+#define SETTINGS_MAGIC_PREV2  0x53505233   // "SPR3"
+#define SETTINGS_MAGIC_PREV   0x53505232   // "SPR2"
+#define SETTINGS_MAGIC_OLD    0x53505231   // "SPR1"
 
 // Default values
 #define SETTINGS_MOTOR_POWER_DEFAULT      188
@@ -47,6 +49,7 @@ typedef struct {
   char web_pass[SETTINGS_WEB_PASS_MAX];  // web interface password (when web_auth_enabled)
   uint8_t web_auth_enabled;   // 0/1 - require password for the STA web interface
   char name[SETTINGS_NAME_MAX];  // friendly device name for display (HA device name / web UI)
+  char update_url[SETTINGS_UPDATE_URL_MAX];  // plain-HTTP URL for auto firmware download (empty = web OTA only)
 } AppSettings;
 
 // EEPROM init (called once in setup)

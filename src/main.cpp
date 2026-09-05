@@ -160,6 +160,10 @@ void setup() {
 }
 
 void loop() {
+  // Deferred firmware install (web/MQTT set a flag; the actual download runs
+  // here, after the web response is sent, in a quiet context).
+  updaterRunInstall();
+
   webLoop();               // handles HTTP (and DNS in AP/AP_STA modes)
 
   if (deviceMode == MODE_STA) {

@@ -1,8 +1,9 @@
 #include "updater.h"
 #include "config.h"
+#include "settings.h"
+#include "mqtt.h"
+#include "webserver.h"
 #include <ESP8266WiFi.h>
-#include <WiFiClientSecure.h>
-#include <ESP8266HTTPClient.h>
 #include <ESP8266httpUpdate.h>
 #include <ArduinoJson.h>
 
@@ -145,29 +146,54 @@ UpdateCheckResult updaterCheck() {
   return parseRelease(doc);
 }
 
+// ==================== Pending install (deferred to loop) ====================
+static bool installPending = false;
+static const char *installResult = "";
+
+bool updaterRequestInstall() {
+  if (!availAvailable || availAssetUrl.isEmpty()) {
+    installResult = "No update found to install";
+    return false;
+  }
+  installPending = true;
+  installResult = "Update started...";
+  DEBUG_PRINTLN("[UPD] Install requested");
+  return true;
+}
+
+const char *updaterLastResult() {
+  return installResult;
+}
+
 // Installs a previously found firmware update.
+// The firmware BYTES are pulled over plain HTTP from gSettings.update_url:
+// GitHub's CDN sends full-size (16KB) TLS records that BearSSL on this device
+// cannot buffer (recv buffer must be >= record size, but a 16KB buffer doesn't
+// fit the heap together with the 6.2KB BearSSL stack). Plain HTTP has no such
+// limit and streams straight into flash with a small buffer.
 UpdateCheckResult updaterInstall() {
   if (!availAvailable || availAssetUrl.isEmpty()) {
     DEBUG_PRINTLN("[UPD] No found update to install");
     return UPDATE_RESULT_ERROR;
   }
+  if (gSettings.update_url[0] == '\0') {
+    DEBUG_PRINTLN("[UPD] No update_url configured - set it to a plain HTTP URL of the .bin, "
+                  "or install manually via web OTA");
+    return UPDATE_RESULT_ERROR;
+  }
+  if (!String(gSettings.update_url).startsWith("http://")) {
+    DEBUG_PRINTLN("[UPD] update_url must start with http:// (plain HTTP)");
+    return UPDATE_RESULT_ERROR;
+  }
 
-  DEBUG_PRINTLN("[UPD] Starting update...");
+  DEBUG_PRINTF("[UPD] Starting update from %s\n", gSettings.update_url);
 
-  WiFiClientSecure dlClient;
-  dlClient.setInsecure();
-  dlClient.setTimeout(15);
-  // Same reduced TLS buffers as the update check: the default 16KB TLS buffer
-  // fails the handshake on the ESP8266's limited heap ("connection failed").
-  dlClient.setBufferSizes(8192, 512);
-  dlClient.setNoDelay(true);
+  // Free heap and stop MQTT so the device gives the download a quiet run.
+  mqttDisconnect();
 
-  // The GitHub releases/download/... URL 302-redirects to the actual asset
-  // host (release-assets.githubusercontent.com). ESP8266httpUpdate disables
-  // redirect follow by default, so enable it.
-  ESPhttpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-
-  t_httpUpdate_return ret = ESPhttpUpdate.update(dlClient, availAssetUrl);
+  DEBUG_PRINTF("[UPD] heap before download: %d\n", ESP.getFreeHeap());
+  WiFiClient tcpClient;   // plain HTTP: no TLS -> tiny heap, no record-size limits
+  t_httpUpdate_return ret = ESPhttpUpdate.update(tcpClient, String(gSettings.update_url));
   switch (ret) {
     case HTTP_UPDATE_OK:
       DEBUG_PRINTLN("[UPD] Updated! Rebooting...");
@@ -185,4 +211,29 @@ UpdateCheckResult updaterInstall() {
       return UPDATE_RESULT_ERROR;
   }
   return UPDATE_RESULT_ERROR;
+}
+
+// Runs a requested install from the main loop.
+bool updaterRunInstall() {
+  if (!installPending) return false;
+  installPending = false;
+
+  // Largest heap is available when the web server is down, so stop it first.
+  // On success the device reboots; on failure we bring the server back up.
+  webStop();
+
+  UpdateCheckResult r = updaterInstall();
+  switch (r) {
+    case UPDATE_RESULT_OK:      installResult = "Update installed. Rebooting..."; break;
+    case UPDATE_RESULT_NO_UPDATES: installResult = "No update required"; break;
+    case UPDATE_RESULT_ERROR:   installResult = "Update failed (see logs)"; break;
+    default:                    installResult = "Update failed (see logs)"; break;
+  }
+
+  if (r != UPDATE_RESULT_OK) {
+    // Recreate the working-mode web interface so the user can retry.
+    mqttBegin(gSettings);
+    webInitSta();
+  }
+  return true;
 }

@@ -19,4 +19,8 @@ bool mqttConnected();
 // Called on connect and after update check/install.
 void mqttPublishDeviceInfo();
 
+// Disconnect and free the MQTT client socket/buffer. Called before a firmware
+// download to maximize free heap.
+void mqttDisconnect();
+
 #endif
