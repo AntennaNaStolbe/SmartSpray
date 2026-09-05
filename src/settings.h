@@ -18,13 +18,17 @@
 // Magic number to validate the saved config.
 // VERSION: when AppSettings fields change, increment so old configs
 // (with a different layout) are not read as valid.
-#define SETTINGS_MAGIC  0x53505234   // "SPR4"
+#define SETTINGS_MAGIC  0x53505236   // "SPR6"
 
 // Magic numbers of previous AppSettings layouts, used for automatic migration
 // of the saved config without re-setup:
 //   SETTINGS_MAGIC_OLD  = SPR1: before web auth was added
 //   SETTINGS_MAGIC_PREV = SPR2: after web auth, before the "name" field
 //   SETTINGS_MAGIC_PREV2 = SPR3: after "name", before the "update_url" field
+//   SETTINGS_MAGIC_PREV3 = SPR4: after "update_url", before "update_pending"
+//   SETTINGS_MAGIC_PREV4 = SPR5: after "update_pending", before "update_asset_url"
+#define SETTINGS_MAGIC_PREV4  0x53505235   // "SPR5"
+#define SETTINGS_MAGIC_PREV3  0x53505234   // "SPR4"
 #define SETTINGS_MAGIC_PREV2  0x53505233   // "SPR3"
 #define SETTINGS_MAGIC_PREV   0x53505232   // "SPR2"
 #define SETTINGS_MAGIC_OLD    0x53505231   // "SPR1"
@@ -50,6 +54,8 @@ typedef struct {
   uint8_t web_auth_enabled;   // 0/1 - require password for the STA web interface
   char name[SETTINGS_NAME_MAX];  // friendly device name for display (HA device name / web UI)
   char update_url[SETTINGS_UPDATE_URL_MAX];  // plain-HTTP URL for auto firmware download (empty = web OTA only)
+  uint8_t update_pending;        // 0/1 - install the found update at next boot (clean heap)
+  char update_asset_url[SETTINGS_UPDATE_URL_MAX]; // GitHub asset URL of the pending update (used at boot, no re-check needed)
 } AppSettings;
 
 // EEPROM init (called once in setup)

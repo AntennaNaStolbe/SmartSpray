@@ -11,8 +11,10 @@ enum UpdateCheckResult {
   UPDATE_RESULT_ERROR = 3,      // error (network/JSON/no asset)
 };
 
-// Initialization (Reserved flash info etc.) — called in setup
-void updaterInit();
+// Called in setup once WiFi is connected, before the web server / MQTT start:
+// installs a pending update on the clean boot heap, if the user requested one
+// last session. Returns true if a pending update was processed.
+bool updaterRunPendingOnBoot();
 
 // Checks GitHub (api.github.com) for a new version, but does NOT install it.
 // If a new version is found, it is remembered and UPDATE_RESULT_AVAILABLE is returned.
@@ -24,11 +26,11 @@ UpdateCheckResult updaterCheck();
 // On success the device reboots. Returns UPDATE_RESULT_OK/NO_UPDATES/ERROR.
 UpdateCheckResult updaterInstall();
 
-// Request installing the found update. Sets an internal flag only; the actual
-// download happens later from the main loop (outside the web/MQTT request
-// handler) via updaterRunInstall().
+// Request installing the found update. Persists a pending flag (the update
+// happens at the next boot on the clean heap - the device reboots now).
 bool updaterRequestInstall();
-// If an install was requested, runs it now (download, flash). Called from
+// If an install was requested, reboots the device so the pending update is
+// installed on the clean boot heap by updaterRunPendingOnBoot(). Called from
 // loop(). Returns true if a request was processed.
 bool updaterRunInstall();
 

@@ -59,6 +59,45 @@ struct AppSettingsPrev2 {
   char name[SETTINGS_NAME_MAX];
 };
 
+// Previous AppSettings layout (before the "update_pending" field was added),
+// magic = SETTINGS_MAGIC_PREV3.
+struct AppSettingsPrev3 {
+  uint32_t magic;
+  char wifi_ssid[SETTINGS_WIFI_SSID_MAX];
+  char wifi_pass[SETTINGS_WIFI_PASS_MAX];
+  char mqtt_host[SETTINGS_MQTT_HOST_MAX];
+  uint16_t mqtt_port;
+  char mqtt_user[SETTINGS_MQTT_USER_MAX];
+  char mqtt_pass[SETTINGS_MQTT_PASS_MAX];
+  uint8_t motor_power;
+  uint8_t auto_update_enabled;
+  char web_user[SETTINGS_WEB_USER_MAX];
+  char web_pass[SETTINGS_WEB_PASS_MAX];
+  uint8_t web_auth_enabled;
+  char name[SETTINGS_NAME_MAX];
+  char update_url[SETTINGS_UPDATE_URL_MAX];
+};
+
+// Previous AppSettings layout (before the "update_asset_url" field was added),
+// magic = SETTINGS_MAGIC_PREV4.
+struct AppSettingsPrev4 {
+  uint32_t magic;
+  char wifi_ssid[SETTINGS_WIFI_SSID_MAX];
+  char wifi_pass[SETTINGS_WIFI_PASS_MAX];
+  char mqtt_host[SETTINGS_MQTT_HOST_MAX];
+  uint16_t mqtt_port;
+  char mqtt_user[SETTINGS_MQTT_USER_MAX];
+  char mqtt_pass[SETTINGS_MQTT_PASS_MAX];
+  uint8_t motor_power;
+  uint8_t auto_update_enabled;
+  char web_user[SETTINGS_WEB_USER_MAX];
+  char web_pass[SETTINGS_WEB_PASS_MAX];
+  uint8_t web_auth_enabled;
+  char name[SETTINGS_NAME_MAX];
+  char update_url[SETTINGS_UPDATE_URL_MAX];
+  uint8_t update_pending;
+};
+
 void settingsInit() {
   if (!eepromReady) {
     EEPROM.begin(EEPROM_SIZE);
@@ -98,6 +137,9 @@ static void settingsNormalize(AppSettings &s) {
   }
   // Null-terminate the update URL (empty = manual web OTA only).
   s.update_url[SETTINGS_UPDATE_URL_MAX - 1] = '\0';
+  s.update_asset_url[SETTINGS_UPDATE_URL_MAX - 1] = '\0';
+  // Update-pending flag is a simple 0/1.
+  if (s.update_pending > 1) s.update_pending = 0;
 }
 
 bool settingsLoad(AppSettings &s) {
@@ -148,6 +190,28 @@ bool settingsLoad(AppSettings &s) {
     EEPROM.get(EEPROM_CONFIG_OFFSET, prev);
     s.magic = SETTINGS_MAGIC;
     s.update_url[0] = '\0';
+    // All other fields are at identical offsets; keep them as-is.
+    settingsSave(s);
+  }
+
+  // Previous config (before the "update_pending" flag): migrate, preserving
+  // everything. No updater is pending by default.
+  if (s.magic == SETTINGS_MAGIC_PREV3) {
+    AppSettingsPrev3 prev;
+    EEPROM.get(EEPROM_CONFIG_OFFSET, prev);
+    s.magic = SETTINGS_MAGIC;
+    s.update_pending = 0;
+    // All other fields are at identical offsets; keep them as-is.
+    settingsSave(s);
+  }
+
+  // Previous config (before the "update_asset_url" field): migrate, preserving
+  // everything. No pending asset URL by default.
+  if (s.magic == SETTINGS_MAGIC_PREV4) {
+    AppSettingsPrev4 prev;
+    EEPROM.get(EEPROM_CONFIG_OFFSET, prev);
+    s.magic = SETTINGS_MAGIC;
+    s.update_asset_url[0] = '\0';
     // All other fields are at identical offsets; keep them as-is.
     settingsSave(s);
   }

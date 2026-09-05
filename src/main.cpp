@@ -107,6 +107,7 @@ static void handleApStaScan() {
     DEBUG_PRINTLN("[WIFI] Configured network found, connecting...");
     if (tryConnectSTA(savedCfg, WIFI_CONNECT_TIMEOUT_MS)) {
       wifiConnFailCount = 0;
+      updaterRunPendingOnBoot();   // install any pending update on the fresh heap
       enterStaMode(savedCfg);
     } else {
       wifiConnFailCount++;
@@ -137,13 +138,15 @@ void setup() {
 
   motorInit();             // motor in "off" state
   settingsInit();
-  updaterInit();
 
   AppSettings s;
   if (settingsLoad(s)) {
     gSettings = s;
     motorSetPower(s.motor_power);
     if (tryConnectSTA(s, WIFI_CONNECT_TIMEOUT_MS)) {
+      // Install a pending update on the clean boot heap (before the web server
+      // / MQTT start allocating and fragmenting it).
+      updaterRunPendingOnBoot();
       enterStaMode(s);
     } else {
       enterApConnectMode(s);

@@ -79,16 +79,15 @@ NodeMCU support was removed; the code targets the Wemos D1 Mini.
 - **Check and install are separate**: `updaterCheck()` only checks (remembers the available version), `updaterInstall()` installs. Install only on an explicit command (`#updBtn` in web / MQTT command `UPDATE`)
 - Daily check once a day (if auto-updates enabled in settings) + on button
 - HTTPS to GitHub (check only) via `WiFiClientSecure.setInsecure()` with an 8KB TLS recv buffer — small responses fit fine
-- **The firmware BYTES are downloaded directly from the GitHub release asset over TLS** — no user-configured update URL. The user only presses Update. Tuned to the edge of the heap (verified E2E):
-  - CDN `release-assets.githubusercontent.com` sends full-size (~16.4KB) TLS records ⇒ BearSSL needs the **maximum receive buffer 16384 + 325 overhead = 16709B**; smaller buffers stall ("Stream Read Timeout")
-  - That buffer + the 6.2KB BearSSL thunk stack (`StackThunk.cpp`) only fit because the install is deferred (`webStop()` + MQTT disconnected first) and the heap order matters:
-    1. `githubDirectAssetUrl()` resolves the CDN URL with a **small-buffer (8192) 302 request** (`HTTPC_DISABLE_FOLLOW_REDIRECTS` + `collectHeaders("Location")`) — following the redirect inside the big-buffer client would hold two 16.7KB recv buffers at once
-    2. **two-pass defrag** (`malloc(max free - 4096)` then `free`) until `maxFreeBlockSize ≥ 17000`
-    3. only then construct the big `WiFiClientSecure` (constructing it earlier fragments the heap: "Unable to allocate memory for SSL structures")
-    4. **pre-flight TLS handshake** to the CDN edge before `ESPhttpUpdate.update()` — without it the download intermittently fails "connection failed (-1)"
+- **The firmware BYTES are downloaded directly from the GitHub release asset over TLS** — no user-configured update URL. The user only presses Update. Full pipeline verified E2E (v3.0.6 release, self-update → v3.0.7 test):
+  - Install runs on the **clean boot heap**: `/api/update` persists `update_pending` + `update_asset_url` to EEPROM, reboots (`updaterRunInstall()`), and at boot `updaterRunPendingOnBoot()` (before web/MQTT start) installs. Flag cleared first so a failed install can't reboot-loop — after a failure the device continues to normal STA mode.
+  - One `WiFiClientSecure` with the **maximum BearSSL receive buffer** (`setBufferSizes(16384,512)` = ~16.7KB; the CDN sends full-size ~16.4KB TLS records, smaller stalls "Stream Read Timeout") is reused for both hops. The 6.2KB BearSSL thunk stack (`StackThunk.cpp`) only fits because the install is deferred (web + MQTT stopped → monolithic heap).
+  - **github.com redirect handled MANUALLY** — ESP8266httpUpdate does NOT follow the release 302 (aborts with `HTTP_UE_SERVER_FILE_NOT_FOUND` -104). Our loop: hop1 `GET browser_download_url` → 302 (`getLocation()`, `HTTPC_DISABLE_FOLLOW_REDIRECTS`), hop2 reconnects the SAME client to the CDN and `GET`s the asset. hop1 is `h.end()`-ed before hop2 connects, so the single 16.7KB buffer rotates in one heap region — no second big buffer, no separate CDN-URL resolution step.
+  - **Streaming is manual**, NOT `HTTPClient::writeToStream` (its internal `sendSize` can block indefinitely on a stalled TLS read). Our loop reads plaintext via `getStreamPtr()` → `available()`/`read()` with `tlsClient.setTimeout(8)` and feeds `UpdateStream` (`Update.write()`), guarded by `h.connected() && total < h.getSize()`. Retries (3×) rebuild the client so heap is fully released.
+  - ESP8266httpUpdate (and `webStop()` + defrag + pre-flight handshake from earlier iterations) is now the **plain-HTTP `update_url` override path only**; the GitHub path is the manual hop2 stream above. `githubDirectAssetUrl()`, the two-pass defrag and the pre-flight handshake were removed.
 - `gSettings.update_url` remains as an optional **plain-HTTP (http://) override** (kept for local installs); default empty = GitHub-direct
-- `/api/update` sets a flag; the actual download runs from `loop()` (`updaterRunInstall()`); on success the device reboots, on failure `mqttBegin(webInitSta)` restores the working mode
-- To release an update: bump `FW_VERSION`, build `pio run`, upload `SmartSpray.bin` to a GitHub Release tagged `v<FW_VERSION>`.
+- `/api/update` sets a flag + persists; the actual download runs from `loop()` (`updaterRunInstall()`); on success the new firmware reboots on its own, on failure the device works on normally (`mqttBegin(webInitSta)` restores the working mode)
+- To release an update: bump `FW_VERSION`, build `pio run`, upload the firmware **named `SmartSpray.bin`** (gh's `file#label` rename does not work — the asset name = local file name) to a GitHub Release tagged `v<FW_VERSION>`. Delete stale asset first: `gh release delete-asset --yes <tag> SmartSpray.bin` (API reflects the change with a few seconds' lag).
 
 ## MQTT Topics (base `antennans/SmartSpray/<device_id>/…`)
 

@@ -34,9 +34,10 @@ static bool versionLess(const String &a, const String &b) {
   }
 }
 
-void updaterInit() {
-  // reserve flash info — not explicitly needed for ESPhttpUpdate
-}
+// Permanently holding a WiFiClientSecure (the 6.2KB BearSSL thunk stack) splits
+// even the fresh boot heap into two halves, so there is NO long-lived secure
+// client. The thunk is compiled only during the boot install (via the download
+// client), when the heap is still monolithic.
 
 // ==================== Found update state ====================
 static bool availAvailable = false;      // new update found (not yet installed)
@@ -156,9 +157,21 @@ bool updaterRequestInstall() {
     installResult = "No update found to install";
     return false;
   }
+  // Persist the pending flag AND the asset URL so the update survives a reboot.
+  // The download itself is deferred to the next boot: the device reboots now
+  // (see updaterRunInstall) and updaterRunPendingOnBoot() installs on the clean
+  // boot heap, BEFORE the web server / MQTT start fragmenting it. Storing the
+  // URL means the boot install needs no re-check (no extra TLS client on the
+  // fresh heap - each one leaves small BearSSL pieces that cap the largest free
+  // block below what the 16.7KB TLS receive buffer needs).
+  gSettings.update_pending = 1;
+  strncpy(gSettings.update_asset_url, availAssetUrl.c_str(),
+          SETTINGS_UPDATE_URL_MAX - 1);
+  gSettings.update_asset_url[SETTINGS_UPDATE_URL_MAX - 1] = '\0';
+  settingsSave(gSettings);
   installPending = true;
   installResult = "Update started...";
-  DEBUG_PRINTLN("[UPD] Install requested");
+  DEBUG_PRINTLN("[UPD] Install requested (reboot pending)");
   return true;
 }
 
@@ -166,50 +179,47 @@ const char *updaterLastResult() {
   return installResult;
 }
 
-// Resolves the browser_download_url (github.com -> 302) to the DIRECT CDN URL.
-// Uses a small TLS buffer (the 302 response is tiny), because following the
-// redirect inside the big-buffer download client would hold TWO 16.7KB recv
-// buffers (github.com + CDN host) at once and never fit the heap.
-static String githubDirectAssetUrl() {
-  WiFiClientSecure c;
-  c.setInsecure();
-  c.setTimeout(15);
-  c.setBufferSizes(8192, 512);
-  c.setNoDelay(true);
-  HTTPClient h;
-  if (!h.begin(c, availAssetUrl)) {
-    DEBUG_PRINTLN("[UPD] Resolve: failed to start HTTP");
-    return "";
-  }
-  const char *keys[] = {"Location"};
-  h.collectHeaders(keys, 1);
-  h.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
-  int code = h.GET();
-  String loc = h.header("Location");
-  h.end();
-  if (code != HTTP_CODE_FOUND && code != HTTP_CODE_MOVED_PERMANENTLY) {
-    DEBUG_PRINTF("[UPD] Resolve: expected 302, got %d\n", code);
-    return "";
-  }
-  if (!loc.startsWith("https://")) {
-    DEBUG_PRINTLN("[UPD] Resolve: bad Location header");
-    return "";
-  }
-  DEBUG_PRINTF("[UPD] Direct asset URL: %s", loc.c_str());
-  return loc;
-}
+// Tiny Stream adapter that swallows the TLS payload straight into the OTA
+// flash buffer: our download loop reads plaintext segments from the connected
+// client and feeds them here; write() calls Update.write() chunk-wise so no
+// extra RAM is needed for the firmware bytes.
+class UpdateStream : public Stream {
+  public:
+    bool init() { return Update.begin(ESP.getFreeSketchSpace(), U_FLASH); }
+    bool finish() { return Update.end(true); }
+    size_t bytes() const { return _n; }
+    bool err() const { return _err != 0; }
+
+    size_t write(uint8_t b) override {
+      uint8_t u = b;
+      int r = Update.write(&u, 1);
+      if (r != 1) { _err = r; return 0; }
+      _n++;
+      return 1;
+    }
+    size_t write(const uint8_t *buf, size_t size) override {
+      int r = Update.write((uint8_t *)buf, size);
+      if (r <= 0) { _err = r; return 0; }
+      _n += (size_t)r;
+      return (size_t)r;
+    }
+    int available() override { return 0; }
+    int read() override { return -1; }
+    int peek() override { return -1; }
+    void flush() override {}
+
+  private:
+    size_t _n = 0;
+    int    _err = 0;
+};
 
 // Installs a previously found firmware update.
-// By default the firmware BYTES are downloaded straight from GitHub (the
-// release asset) over TLS. GitHub's asset CDN sends full-size (~16.4KB) TLS
-// records, so BearSSL needs the maximum receive buffer (16384 + 325 overhead =
-// 16709B); anything smaller stalls the stream. That buffer + the 6.2KB BearSSL
-// thunk stack only just fit the heap, and only because the install is deferred
-// (web server + MQTT stopped first, see updaterRunInstall) and the direct CDN
-// URL is resolved with a cheap small-buffer request beforehand (a redirect
-// inside the big-buffer client would double the recv-buffer peak).
-// gSettings.update_url is an optional override pointing at a plain-HTTP LAN
-// host (kept for local installs; default empty = GitHub).
+// By default the firmware BYTES are downloaded straight from GitHub over TLS:
+// github.com returns a 302 to the CDN, which is then streamed to the flash on
+// the same 16.7KB-buffered TLS client (see the GitHub branch below). The
+// install runs on the clean boot heap (reboot scheme). gSettings.update_url is
+// an optional override pointing at a plain-HTTP LAN host (kept for local
+// installs; default empty = GitHub).
 UpdateCheckResult updaterInstall() {
   if (!availAvailable || availAssetUrl.isEmpty()) {
     DEBUG_PRINTLN("[UPD] No found update to install");
@@ -229,77 +239,116 @@ UpdateCheckResult updaterInstall() {
   // The web server is already stopped by updaterRunInstall(); drop MQTT too so
   // the TLS download gets the biggest possible heap.
   mqttDisconnect();
-  DEBUG_PRINTF("[UPD] heap before download: %u\n", ESP.getFreeHeap());
+  DEBUG_PRINTF("[UPD] heap before download: %u max=%u\n", ESP.getFreeHeap(),
+               (unsigned)ESP.getMaxFreeBlockSize());
 
   // Order matters a lot here. Constructing a WiFiClientSecure pulls in the
   // 6.2KB BearSSL stack, and holding one while resolving the CDN URL leaves the
   // heap too fragmented for the ~16.7KB receive buffer ("Unable to allocate
-  // memory for SSL structures"). So: use a plain client by default, resolve +
-  // defrag, and only then build the big secure client.
+  // memory for SSL structures"). So: use a plain client by default; in the
+  // GitHub branch build the big secure client FIRST (it grabs the biggest
+  // contiguous region) and only then resolve, inside the branch.
   WiFiClient plainClient;
   WiFiClient *client = &plainClient;
-  WiFiClientSecure tlsClient;
 
   if (useGithub) {
     DEBUG_PRINTLN("[UPD] Installing from GitHub (TLS)");
-    String direct = githubDirectAssetUrl();
-    if (direct.isEmpty()) {
-      DEBUG_PRINTLN("[UPD] Could not resolve the direct asset URL");
-      return UPDATE_RESULT_ERROR;
-    }
-    url = direct;
 
-    // Coalesce the heap: grab the largest free block and release it so the
-    // BearSSL receive buffer gets a contiguous ~17KB region. Repeat in case a
-    // release frees up something adjacent.
-    size_t warm = ESP.getFreeHeap() - 4096;
-    for (int pass = 0; pass < 2; pass++) {
-      void *defrag = warm > 0 ? malloc(warm) : (void*)0;
-      if (defrag) free(defrag);
-      if (ESP.getMaxFreeBlockSize() >= 17000) break;
-    }
-    if (ESP.getMaxFreeBlockSize() < 17000) {
-      DEBUG_PRINTF("[UPD] Heap too fragmented for TLS (%u free, %u max block)",
-                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
-      return UPDATE_RESULT_ERROR;
-    }
+    // One WiFiClientSecure with the maximum BearSSL receive buffer is reused
+    // for both hops: hop1 gets the github.com 302 (redirects are NOT followed
+    // by HTTPClient here - ESP8266httpUpdate does not follow them at all and
+    // aborts with HTTP_UE_SERVER_FILE_NOT_FOUND (-104)), hop2 reconnects to the
+    // CDN and streams the firmware body to the flash. hop1 is fully freed
+    // before hop2 connects, so the single ~16.7KB buffer rotates in the same
+    // heap region. Live streaming uses explicit per-read timeouts (Stream's
+    // sendSize can block indefinitely). Every failed attempt rebuilds the
+    // client so a broken one releases its heap fully.
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      WiFiClientSecure tlsClient;
+      tlsClient.setInsecure();
+      tlsClient.setTimeout(30);
+      tlsClient.setBufferSizes(16384, 512);
+      tlsClient.setNoDelay(true);
 
-    // Maximum BearSSL receive buffer. The CDN sends records just over 16KB;
-    // the maximum settable (16384) + BearSSL overhead (325B) = 16709B covers
-    // them - but a smaller buffer stalls the TLS stream.
-    tlsClient.setInsecure();
-    tlsClient.setTimeout(30);
-    tlsClient.setBufferSizes(16384, 512);
-    tlsClient.setNoDelay(true);
-    client = &tlsClient;
+      DEBUG_PRINTF("[UPD] Try %d: updating from %s\n", attempt, url.c_str());
 
-    // Pre-flight handshake to the CDN host. Empirically required: a fresh
-    // big-buffer download right after resolving can fail with "connection
-    // failed (-1)"; priming the DNS + socket + TLS to the same CDN edge first
-    // makes the download reliable.
-    String host = direct;
-    if (host.startsWith("https://")) host.remove(0, 8);
-    int slash = host.indexOf('/');
-    if (slash >= 0) host.remove(slash);
-    char hostBuf[96];
-    host.toCharArray(hostBuf, sizeof(hostBuf));
-
-    WiFiClientSecure pre;
-    pre.setInsecure();
-    pre.setTimeout(15);
-    pre.setBufferSizes(16384, 512);
-    pre.setNoDelay(true);
-    int rc = pre.connect(hostBuf, 443);
-    char serr[96] = "";
-    pre.getLastSSLError(serr, sizeof(serr));
-    pre.stop();
-    if (rc != 1) {
-      DEBUG_PRINTF("[UPD] TLS pre-flight failed (%d) \"%s\"", rc, serr);
-      return UPDATE_RESULT_ERROR;
+      {
+        HTTPClient h;
+        h.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+        h.setTimeout(30000);
+        if (h.begin(tlsClient, url)) {
+          int code1 = h.GET();
+          String loc = h.getLocation();
+          DEBUG_PRINTF("[UPD] hop1 code=%d\n", code1);
+          h.end();
+          if (code1 == HTTP_CODE_FOUND && loc.startsWith("https://")) {
+            if (h.begin(tlsClient, loc)) {
+              int code2 = h.GET();
+              DEBUG_PRINTF("[UPD] hop2 code=%d\n", code2);
+              if (code2 == HTTP_CODE_OK) {
+                WiFiClient *s = h.getStreamPtr();
+                const int body = h.getSize();
+                tlsClient.setTimeout(8);
+                UpdateStream us;
+                DEBUG_PRINTF("[UPD] flash begin, free=%u\n",
+                             (unsigned)ESP.getFreeSketchSpace());
+                us.init();
+                int total = 0;
+                while (h.connected() && total < body) {
+                  while (s->available() > 0 && total < body) {
+                    uint8_t buf[512];
+                    int n = s->read(buf, sizeof buf);
+                    if (n > 0) {
+                      int w = us.write(buf, (size_t)n);
+                      if (w != n) {
+                        DEBUG_PRINTF("[UPD] flash write error %d\n", w);
+                      }
+                      total += n;
+                    } else if (n < 0) {
+                      DEBUG_PRINTLN("[UPD] tls read error");
+                      total = body;   // force exit
+                    }
+                  }
+                  delay(1);
+                }
+                DEBUG_PRINTF("[UPD] download done: %d/%d conn=%d\n",
+                             total, body, (int)h.connected());
+                if (total == body && !us.err()) {
+                  if (us.finish()) {
+                    DEBUG_PRINTF("[UPD] Updated (%u bytes)! Rebooting...\n",
+                                 (unsigned)us.bytes());
+                    h.end();
+                    delay(600);
+                    yield();
+                    ESP.restart();
+                    return UPDATE_RESULT_OK;
+                  }
+                  DEBUG_PRINTF("[UPD] Update.end failed (%d), keeping old firmware\n",
+                               (int)Update.getError());
+                } else {
+                  DEBUG_PRINTF("[UPD] download aborted: %d/%d\n", total, body);
+                }
+                h.end();
+                delay(1200);
+              } else {
+                DEBUG_PRINTF("[UPD] CDN error: code=%d\n", code2);
+              }
+              h.end();
+            }
+          } else {
+            DEBUG_PRINTF("[UPD] unexpected hop1: code=%d\n", code1);
+          }
+        } else {
+          DEBUG_PRINTLN("[UPD] failed to start request");
+        }
+        h.end();
+      }
+      tlsClient.stop();
+      delay(1500);
+      yield();
     }
-    DEBUG_PRINTF("[UPD] TLS pre-flight OK (%s)", hostBuf);
+    return UPDATE_RESULT_ERROR;
   }
-
   DEBUG_PRINTF("[UPD] Starting update from %s\n", url.c_str());
   t_httpUpdate_return ret = ESPhttpUpdate.update(*client, url);
   switch (ret) {
@@ -321,27 +370,49 @@ UpdateCheckResult updaterInstall() {
   return UPDATE_RESULT_ERROR;
 }
 
-// Runs a requested install from the main loop.
+// Rebooting is the safest way to get a monolithic heap: the running web
+// server / MQTT client leave ~2KB of small used blocks right between the two
+// large free areas, so the largest free block caps at ~12KB (under the 16.7KB
+// BearSSL receive buffer needs) no matter how the heap is defragmented. A fresh
+// boot has a single large free region, so the install (done by
+// updaterRunPendingOnBoot in setup) reliably fits.
 bool updaterRunInstall() {
   if (!installPending) return false;
   installPending = false;
 
-  // Largest heap is available when the web server is down, so stop it first.
-  // On success the device reboots; on failure we bring the server back up.
-  webStop();
+  DEBUG_PRINTLN("[UPD] Rebooting to install on a clean heap...");
+  // Give the "Update started..." HTTP response a moment to flush to the browser
+  // (and the MQTT ack) before the WDT-safe restart.
+  delay(400);
+  yield();
+  ESP.restart();
+  return true;
+}
 
-  UpdateCheckResult r = updaterInstall();
-  switch (r) {
-    case UPDATE_RESULT_OK:      installResult = "Update installed. Rebooting..."; break;
-    case UPDATE_RESULT_NO_UPDATES: installResult = "No update required"; break;
-    case UPDATE_RESULT_ERROR:   installResult = "Update failed (see logs)"; break;
-    default:                    installResult = "Update failed (see logs)"; break;
+// Called from setup() once WiFi is connected, BEFORE the web server and MQTT
+// start. If the user pressed Update last session, install the remembered update
+// now on the clean boot heap. Clears the flag first so a failed install cannot
+// loop the device rebooting forever.
+bool updaterRunPendingOnBoot() {
+  if (!gSettings.update_pending) return false;
+  gSettings.update_pending = 0;
+  settingsSave(gSettings);
+
+  if (WiFi.status() != WL_CONNECTED) {
+    DEBUG_PRINTLN("[UPD] Pending update, but no WiFi - skipping");
+    return true;
   }
 
-  if (r != UPDATE_RESULT_OK) {
-    // Recreate the working-mode web interface so the user can retry.
-    mqttBegin(gSettings);
-    webInitSta();
+  if (gSettings.update_asset_url[0] == '\0') {
+    DEBUG_PRINTLN("[UPD] Pending update, but asset URL missing - skipping");
+    return true;
   }
+
+  DEBUG_PRINTLN("[UPD] Pending update found, installing...");
+  // Reuse the found-update state so updaterInstall() takes the GitHub path.
+  availAvailable = true;
+  availAssetUrl = gSettings.update_asset_url;
+  availVersion = "pending";
+  updaterInstall();   // on success updaterInstall() reboots
   return true;
 }
