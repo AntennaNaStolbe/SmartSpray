@@ -72,16 +72,23 @@ NodeMCU support was removed; the code targets the Wemos D1 Mini.
 - **MQTT unavailable** → non-blocking reconnect (`mqttLoop()` at most once per 5 s, doesn't block webLoop); web page always responds
 - Parameters in `include/config.h`: `WIFI_CONNECT_TIMEOUT_MS`, `WIFI_RETRY_MS`
 
-## GitHub auto-update (check on GitHub, download over plain HTTP)
+## GitHub auto-update (check + download straight from GitHub over TLS)
 
 - Firmware version — `FW_VERSION` in `include/config.h`
 - Device compares `FW_VERSION` against the latest release tag in `AntennaNaStolbe/SmartSpray` (`api.github.com/.../releases/latest`), looks for asset `SmartSpray.bin`
 - **Check and install are separate**: `updaterCheck()` only checks (remembers the available version), `updaterInstall()` installs. Install only on an explicit command (`#updBtn` in web / MQTT command `UPDATE`)
 - Daily check once a day (if auto-updates enabled in settings) + on button
 - HTTPS to GitHub (check only) via `WiFiClientSecure.setInsecure()` with an 8KB TLS recv buffer — small responses fit fine
-- **The firmware BYTES are downloaded from `gSettings.update_url` (plain `http://`, set on the AP setup page) — NOT from GitHub's CDN.** Reason (hard limit, verified): `release-assets.githubusercontent.com` sends full-size (~16.4KB) TLS records, but BearSSL needs a recv buffer ≥ record size; a 16KB buffer doesn't fit the ESP8266 heap together with the 6.2KB BearSSL thunk stack (`StackThunk.cpp`), and any smaller buffer stalls on the oversized records. Plain HTTP has no such limit (tiny heap, no record-size constraint). `update_url` empty ⇒ auto-install disabled (`/api/update` returns an error) and the web drag&drop OTA is used instead. Keep `SmartSpray.bin` current on that host when releasing.
-- When `update_url` is set, `/api/update` sets a flag; the actual download runs from `loop()` (`updaterRunInstall()`): web server is closed (`webStop()`), MQTT disconnected, `ESPhttpUpdate.update(WiFiClient, url)` streams into flash, device reboots on success; on failure `mqttBegin(webInitSta)` restore the working mode
-- To release an update: bump `FW_VERSION`, build `pio run`, upload `SmartSpray.bin` to a GitHub Release tagged `v<FW_VERSION>`, and update the file served at `update_url`
+- **The firmware BYTES are downloaded directly from the GitHub release asset over TLS** — no user-configured update URL. The user only presses Update. Tuned to the edge of the heap (verified E2E):
+  - CDN `release-assets.githubusercontent.com` sends full-size (~16.4KB) TLS records ⇒ BearSSL needs the **maximum receive buffer 16384 + 325 overhead = 16709B**; smaller buffers stall ("Stream Read Timeout")
+  - That buffer + the 6.2KB BearSSL thunk stack (`StackThunk.cpp`) only fit because the install is deferred (`webStop()` + MQTT disconnected first) and the heap order matters:
+    1. `githubDirectAssetUrl()` resolves the CDN URL with a **small-buffer (8192) 302 request** (`HTTPC_DISABLE_FOLLOW_REDIRECTS` + `collectHeaders("Location")`) — following the redirect inside the big-buffer client would hold two 16.7KB recv buffers at once
+    2. **two-pass defrag** (`malloc(max free - 4096)` then `free`) until `maxFreeBlockSize ≥ 17000`
+    3. only then construct the big `WiFiClientSecure` (constructing it earlier fragments the heap: "Unable to allocate memory for SSL structures")
+    4. **pre-flight TLS handshake** to the CDN edge before `ESPhttpUpdate.update()` — without it the download intermittently fails "connection failed (-1)"
+- `gSettings.update_url` remains as an optional **plain-HTTP (http://) override** (kept for local installs); default empty = GitHub-direct
+- `/api/update` sets a flag; the actual download runs from `loop()` (`updaterRunInstall()`); on success the device reboots, on failure `mqttBegin(webInitSta)` restores the working mode
+- To release an update: bump `FW_VERSION`, build `pio run`, upload `SmartSpray.bin` to a GitHub Release tagged `v<FW_VERSION>`.
 
 ## MQTT Topics (base `antennans/SmartSpray/<device_id>/…`)
 
