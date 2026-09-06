@@ -65,8 +65,8 @@ WiFi and MQTT credentials are **not stored in the code** — they are entered th
 // Friendly display name (shown in HA / web UI), configurable via the web page.
 #define DEVICE_NAME_DEFAULT  "SmartSpray"
 
-// Firmware version — also the GitHub release tag for auto-update ("v3.0.3")
-#define FW_VERSION "3.0.3"
+// Firmware version — also the GitHub release tag for auto-update ("v3.0.8")
+#define FW_VERSION "3.0.8"
 
 // Motor speed. Tuned by trial, since each freshener has its own mechanical play.
 // The default (188) usually works.
@@ -120,7 +120,7 @@ On first power-on (or after resetting settings) the device starts an access poin
    - **Device name** (optional) — friendly name shown in Home Assistant. Prefilled with `SmartSpray`; the technical ID (used in MQTT topics/HA) is generated automatically from the MAC address and needs no entry.
    - **WiFi Network** — SSID and password of your home network
    - **MQTT Broker** — broker address/port, username and password (if required)
-   - **Web Interface Access** (optional security) — tick "Require a password for the web interface" and set a username/password (password ≥ 4 chars). Leave unticked for no password.
+   - **Web Interface Access** (optional security) — tick "Username and password for the web interface" and set a username/password (password ≥ 4 chars). Leave unticked for no password.
 3. Press **Save & Reboot** — the device saves settings to EEPROM, reboots and connects to your network.
 
 Settings are stored in flash (EEPROM) and survive reboots **and** OTA updates.
@@ -134,10 +134,10 @@ After connecting to your Wi-Fi network, open `http://<ip-device>/` in a browser 
 
 - **Status** — WiFi ✓/✗ and MQTT ✓/✗ (auto-refreshes every 5 s)
 - **Spray 💦** button — trigger a spray manually
-- **Spray force (motor speed)** slider — value updates live; tune it to your freshener (20–255, default 188). Changes the motor power and saves to EEPROM (with the **Save** button)
-- **Check for updates** button — manually check GitHub (see below)
+- **Spray force (motor speed)** slider — the value updates live and auto-saves to EEPROM a second after the last change (no Save button); **−** / **+** steppers next to the slider let you fine-tune it (20–255, default 188). Find the lowest value that still sprays reliably.
+- **Check GitHub for updates** button — manually check GitHub for a new release (see below)
 - **Drag & drop zone** — attach a `.bin` file to flash over the air (OTA)
-- **Update 💚** button — gray by default, turns **green** when **a file is attached** or **a GitHub update was found**. On click: if a file was selected — flashes it via OTA; otherwise, if an update exists — installs it from GitHub
+- **Update** button — **disabled** by default; it becomes active (and shows what will be installed) when **a file is attached** (plain `Update`) or **a GitHub update is found** (`Update to vX.Y.Z`). On click: if a file was selected — flashes it via OTA; otherwise, if an update exists — installs it from GitHub
 - **Logs** window — the last device debug messages (ring buffer of 40 lines), auto-refresh every 3 s, with a **Clear** button
 - **Reset settings** button — wipe settings, reboot into access-point mode and return to first-time setup
 
@@ -156,7 +156,7 @@ The device tolerates temporary network outages and needs no reconfiguration:
 
 - **WiFi unavailable** (router boots slower than the device): the device raises the **`SmartSpray Setup`** access point as an **AP fallback** and scans the airwaves every 30 s for the configured network. As soon as your network appears — it connects automatically, the AP turns off and the device returns to working mode.
 - If you entered WiFi/MQTT data incorrectly — connect to the `SmartSpray Setup` AP fallback, fix the settings and press **Save & Reboot**. The device does not "hang".
-- **WiFi present but the MQTT broker is still booting** (e.g. HA takes 15 minutes): the device periodically tries to connect to MQTT (non-blocking) and connects as soon as the broker is ready. The web page stays available meanwhile.
+- **WiFi present but the MQTT broker is still booting** (e.g. HA takes 15 minutes): the device periodically tries to connect to MQTT (bounded reconnect — max once per 20 s, each attempt capped at 3 s) and connects as soon as the broker is ready. The web page stays fast and responsive meanwhile.
 
 > The network check interval is configured in `include/config.h` (`WIFI_RETRY_MS`).
 
@@ -186,7 +186,7 @@ MQTT Discovery is used to register the device in HA automatically. When connecte
 
 - **Spraying** (button) — trigger a spray
 - **Check updates** (button) — check GitHub for updates
-- **Update** (button, appears only when an update is available) — install the found update
+- **Update** (button, appears only when an update is available, named e.g. **"Update to v3.0.8"**) — install the found update
 - **Version** (sensor) — current firmware version
 - **Update available** (binary sensor) — whether an update is available
 
@@ -229,7 +229,7 @@ Open to your ideas.
 
 Planned:
 1. Possibly add a "sprays" counter inside the sketch, saved to EEPROM on each trigger, and send the remaining canister % to HA.
-2. Extend the web UI: tune motor speed, reset the spray counter, set the target canister %, etc. (partly done: WiFi/MQTT setup, Spray, OTA, update check, web password).
+2. Extend the web UI: reset the spray counter, set the target canister %, etc. (done so far: WiFi/MQTT setup, Spray, live force slider with auto-save and −/+ steppers, logs window, OTA, GitHub update check/install, web password).
 
 ---
 

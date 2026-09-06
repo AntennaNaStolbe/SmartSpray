@@ -21,7 +21,7 @@
 // ================= FIRMWARE VERSION =================
 // Compared with the GitHub release tag (e.g. "v3.0.0") for auto-update.
 // When releasing a new version — update here AND create a release with the same tag.
-#define FW_VERSION         "3.0.7"
+#define FW_VERSION         "3.0.8"
 #define FW_VERSION_PREFIX  "v"        // release tags are in "v3.0.0" format
 
 // ================= DEVICE ID =================
@@ -65,6 +65,14 @@ const int MOTOR_POWER = 188;
 // How many consecutive connection retries to attempt in AP fallback (network found but wrong password),
 // after which give up and stay on the setup access point.
 #define WIFI_RETRY_MAX_FAILURES  3
+
+// ================= MQTT =================
+// While the broker is unreachable a reconnect attempt must not stall the main
+// loop: cap the TCP/DNS connect wait (espClient) and the MQTT handshake wait
+// (PubSubClient CONNACK), and space the attempts out. Keeps the web interface
+// responsive even with MQTT down.
+#define MQTT_CONNECT_TIMEOUT_MS      3000   // max time one connect attempt may block (DNS + TCP + handshake)
+#define MQTT_RECONNECT_INTERVAL_MS   20000  // min gap between connection attempts
 
 // ================= GITHUB (auto-update) =================
 // Repository from which firmware is fetched for auto-update.

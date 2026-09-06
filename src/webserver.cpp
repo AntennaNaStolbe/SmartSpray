@@ -22,295 +22,646 @@ static unsigned long lastUploadLog = 0;
 //                        HTML (Setup mode / AP)
 // ============================================================
 static const char HTML_CONFIG[] PROGMEM =
-"<!DOCTYPE html>"
-"<html lang=\"en\"><head>"
-"<meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-"<title>" AP_SSID "</title>"
-"<style>"
-"*{box-sizing:border-box;margin:0;padding:0}"
-"body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#1a1a2e;color:#eee;min-height:100vh;display:flex;align-items:center;justify-content:center}"
-".card{background:#16213e;padding:40px;border-radius:16px;width:90%;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,0.3)}"
-"h1{font-size:22px;margin-bottom:4px}"
-".subtitle{font-size:14px;color:#888;margin-bottom:24px}"
-".section{font-size:12px;color:#0f3460;text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px}"
-".section{color:#e94560}"
-"input{width:100%;padding:12px;background:#1a1a2e;border:1px solid #333;border-radius:8px;color:#eee;font-size:14px;margin-bottom:8px;outline:none}"
-"input:focus{border-color:#e94560}"
-".row{display:flex;gap:8px}"
-".row input:first-child{flex:1}"
-".row input:last-child{width:100px}"
-".btn{width:100%;padding:14px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:16px;background:#e94560;color:#fff}"
-".btn:hover{background:#d63851}"
-".btn:disabled{background:#555;cursor:not-allowed}"
-".status{margin-top:16px;padding:12px;border-radius:8px;font-size:14px;display:none}"
-".status.info{display:block;background:rgba(15,52,96,0.3);color:#4fc3f7}"
-".status.success{display:block;background:rgba(78,204,163,0.15);color:#4ecca3}"
-".status.error{display:block;background:rgba(233,69,96,0.15);color:#e94560}"
-".note{font-size:12px;color:#555;margin-top:12px;text-align:center}"
-".auth-toggle{display:flex;align-items:center;gap:10px;font-size:14px;color:#eee;margin:6px 0 10px;cursor:pointer}"
-".auth-toggle input{width:18px;height:18px;accent-color:#4ecca3;cursor:pointer;margin:0}"
-".note2{font-size:12px;color:#888;margin-bottom:8px}"
-"</style></head><body>"
-"<div class=\"card\">"
-"<h1>SmartSpray</h1>"
-"<div class=\"subtitle\">Configure WiFi & MQTT</div>"
-"<div class=\"section\">Device</div>"
-"<input type=\"text\" id=\"name\" value=\"" DEVICE_NAME_DEFAULT "\" placeholder=\"Device name\" autocomplete=\"off\">"
-"<div class=\"note2\">Friendly name shown in Home Assistant. Leave SmartSpray to use the default.</div>"
-"<div class=\"section\">WiFi Network</div>"
-"<input type=\"text\" id=\"ssid\" placeholder=\"SSID\" required autocomplete=\"off\">"
-"<input type=\"password\" id=\"pass\" placeholder=\"Password (leave blank if open)\" autocomplete=\"off\">"
-"<div class=\"section\">MQTT Broker</div>"
-"<div class=\"row\">"
-"<input type=\"text\" id=\"host\" placeholder=\"Host or IP\" required autocomplete=\"off\">"
-"<input type=\"number\" id=\"port\" placeholder=\"Port\" value=\"1883\" min=\"1\" max=\"65535\">"
-"</div>"
-"<input type=\"text\" id=\"user\" placeholder=\"Username (optional)\" autocomplete=\"off\">"
-"<input type=\"password\" id=\"mqtt_pass\" placeholder=\"Password (optional)\" autocomplete=\"off\">"
-"<div class=\"section\">Firmware Updates</div>"
-"<input type=\"text\" id=\"updateUrl\" placeholder=\"http://host/SmartSpray.bin (optional)\" autocomplete=\"off\">"
-"<div class=\"note2\">Plain HTTP URL to the .bin. Replaces the manual drag &amp; drop upload. Leave empty to disable auto-install (manual web OTA only).</div>"
-"<div class=\"section\">Web Interface Access</div>"
-"<label class=\"auth-toggle\"><input type=\"checkbox\" id=\"webAuth\" checked> Require a password for the web interface</label>"
-"<input type=\"text\" id=\"webUser\" placeholder=\"Username (e.g. admin)\" autocomplete=\"off\">"
-"<input type=\"password\" id=\"webPass\" placeholder=\"Password (min 4 chars)\" autocomplete=\"off\">"
-"<div class=\"note2\">The username/password will be requested when opening the main device web page.</div>"
-"<button class=\"btn\" id=\"saveBtn\" onclick=\"save()\">Save & Reboot</button>"
-"<div class=\"status\" id=\"status\"></div>"
-"<div class=\"note\">Connect to network <b>" AP_SSID "</b> and open browser to configure</div>"
-"</div>"
-"<script>"
-"const webAuthBox=document.getElementById('webAuth');"
-"const webAuthFields=['webUser','webPass'];"
-"function toggleWebAuth(){"
-"const on=webAuthBox.checked;"
-"webAuthFields.forEach(id=>{const el=document.getElementById(id);el.disabled=!on;el.style.opacity=on?1:0.4})"
-"}"
-"webAuthBox.addEventListener('change',toggleWebAuth);"
-"toggleWebAuth();"
-"async function save(){"
-"const btn=document.getElementById('saveBtn');"
-"const status=document.getElementById('status');"
-"btn.disabled=true;"
-"status.className='status info';status.textContent='Saving...';"
-"try{"
-"const res=await fetch('/api/config',{"
-"method:'POST',headers:{'Content-Type':'application/json'},"
-"body:JSON.stringify({"
-"name:document.getElementById('name').value,"
-"wifi_ssid:document.getElementById('ssid').value,"
-"wifi_pass:document.getElementById('pass').value,"
-"mqtt_host:document.getElementById('host').value,"
-"mqtt_port:parseInt(document.getElementById('port').value)||1883,"
-"mqtt_user:document.getElementById('user').value,"
-"mqtt_pass:document.getElementById('mqtt_pass').value,"
-"update_url:document.getElementById('updateUrl').value,"
-"web_user:document.getElementById('webUser').value,"
-"web_pass:document.getElementById('webPass').value,"
-"web_auth_enabled:webAuthBox.checked?1:0})});"
-"if(res.ok){"
-"status.className='status success';status.textContent='Saved! Rebooting...';"
-"setTimeout(()=>{window.location='/'},5000)"
-"}else{"
-"const t=await res.text();"
-"status.className='status error';status.textContent='Error: '+t;"
-"btn.disabled=false"
-"}"
-"}catch(e){"
-"status.className='status error';status.textContent='Error: '+e.message;"
-"btn.disabled=false"
-"}"
-"}"
-"</script></body></html>";
+R"cfg(<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101419">
+<title>)cfg"
+AP_SSID
+R"cfg(</title>
+<style>
+:root{
+  --bg:#101419;--srf:#161c24;--srf2:#1b222d;--srf3:#232b39;
+  --brd:#2a3542;--brd2:#3a4757;
+  --tx:#e7ecf3;--tx2:#9fadbd;--tx3:#7d8b9c;
+  --acc:#6d8cff;--acc2:#8ba5ff;
+  --ok:#43d69a;--warn:#f2b544;--err:#f5646c;
+  --r:12px;--r2:10px;--r3:8px;
+  --sh:0 12px 34px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--bg);color:var(--tx);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh}
+.wrap{max-width:480px;margin:0 auto;padding:26px 14px 60px}
+.app-head{margin:8px 0 18px}
+.app-head h1{font-size:23px;font-weight:700;letter-spacing:-.01em}
+.subtitle{font-size:13px;color:var(--tx2);margin-top:2px}
+.card{background:var(--srf);border:1px solid var(--brd);border-radius:var(--r);box-shadow:var(--sh);padding:24px 20px}
+.card+.card{margin-top:16px}
+.card-title{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--acc2);margin:4px 0 12px}
+.sec{border:0;border-top:1px solid var(--brd);margin:20px 0 16px}
+.hint{font-size:12.5px;color:var(--tx2);line-height:1.55;margin-top:6px}
+.hint.err{color:var(--err)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:44px;padding:0 16px;border:1px solid transparent;border-radius:var(--r2);font-family:inherit;font-size:15px;font-weight:600;letter-spacing:.01em;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s,color .15s,transform .05s,opacity .15s;-webkit-tap-highlight-color:transparent}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible{outline:2px solid rgba(109,140,255,.6);outline-offset:2px}
+.btn:disabled{cursor:not-allowed;opacity:.45;transform:none}
+.btn-primary{background:#fff;color:#0d1117}
+.btn-primary:hover:not(:disabled){background:#e9eef6}
+.btn.loading{pointer-events:none}
+.btn.loading::after{content:"";width:15px;height:15px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;display:inline-block;vertical-align:-2px;animation:rot .7s linear infinite;margin-left:8px;opacity:.9}
+@keyframes rot{to{transform:rotate(360deg)}}
+input[type=text],input[type=password],input[type=url],input[type=number]{width:100%;height:44px;padding:0 13px;background:var(--srf2);border:1px solid var(--brd);border-radius:var(--r3);color:var(--tx);font-size:14.5px;font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s,opacity .15s;margin-bottom:10px;-webkit-appearance:none}
+input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(109,140,255,.15)}
+input:disabled{opacity:.45;cursor:not-allowed}
+input::placeholder{color:var(--tx3)}
+input.error{border-color:var(--err)}
+.row{display:flex;gap:10px}
+.row .grow{flex:1}
+.row input:last-child{width:110px;flex:none}
+.switch-row{display:flex;align-items:center;gap:12px;cursor:pointer;-webkit-tap-highlight-color:transparent;padding:6px 0 4px;margin-bottom:10px}
+.switch-row input{position:absolute;opacity:0;width:0;height:0}
+.sw{position:relative;width:42px;height:24px;flex:none}
+.slider{position:absolute;inset:0;border-radius:999px;background:var(--srf3);border:1px solid var(--brd2);transition:background .15s,border-color .15s}
+.slider::before{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--tx3);transition:transform .15s,background .15s}
+.switch-row input:checked+.sw .slider{background:rgba(109,140,255,.25);border-color:var(--acc)}
+.switch-row input:checked+.sw .slider::before{transform:translateX(18px);background:var(--acc)}
+.switch-row:focus-visible .slider{outline:2px solid rgba(109,140,255,.6);outline-offset:2px}
+.sw-label{font-size:14px;color:var(--tx)}
+.msg{display:none;border-radius:var(--r3);padding:12px 14px;font-size:13.5px;line-height:1.5;border:1px solid;margin-top:14px}
+.msg.show{display:block}
+.msg.info{background:rgba(109,140,255,.1);color:#b8c6ff;border-color:rgba(109,140,255,.35)}
+.msg.success{background:rgba(67,214,154,.1);color:#8df0c4;border-color:rgba(67,214,154,.35)}
+.msg.error{background:rgba(245,100,108,.1);color:#ffa4aa;border-color:rgba(245,100,108,.4)}
+.foot{text-align:center;font-size:12.5px;color:var(--tx3);margin-top:22px;line-height:1.7}
+.foot b{color:var(--tx2)}
+@media(max-width:520px){
+.wrap{padding:16px 10px 40px}
+.card{padding:18px 16px}
+.btn{min-height:48px}
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="app-head">
+    <h1>SmartSpray</h1>
+    <div class="subtitle">Configure WiFi &amp; MQTT</div>
+  </header>
+
+  <form class="card" id="cfgForm" novalidate>
+    <div class="card-title">Device</div>
+    <input type="text" id="name" value=")cfg"
+DEVICE_NAME_DEFAULT
+R"cfg(" placeholder="Device name" autocomplete="off">
+    <p class="hint">Friendly name shown in Home Assistant and the web UI.</p>
+
+    <hr class="sec">
+    <div class="card-title">WiFi Network</div>
+    <input type="text" id="ssid" placeholder="SSID" required autocomplete="off">
+    <input type="password" id="pass" placeholder="Password (leave blank if open)" autocomplete="off">
+
+    <hr class="sec">
+    <div class="card-title">MQTT Broker</div>
+    <div class="row">
+      <input type="text" class="grow" id="host" placeholder="Host or IP" required autocomplete="off">
+      <input type="number" id="port" placeholder="Port" value="1883" min="1" max="65535">
+    </div>
+    <input type="text" id="user" placeholder="Username (optional)" autocomplete="off">
+    <input type="password" id="mqtt_pass" placeholder="Password (optional)" autocomplete="off">
+
+    <hr class="sec">
+    <div class="card-title">Web Interface Access</div>
+    <label class="switch-row" for="webAuth">
+      <input type="checkbox" id="webAuth" checked>
+      <span class="sw"><span class="slider"></span></span>
+      <span class="sw-label">Username and password for the web interface</span>
+    </label>
+    <input type="text" id="webUser" placeholder="Username (e.g. admin)" autocomplete="off">
+    <input type="password" id="webPass" placeholder="Password (min 4 chars)" autocomplete="off">
+    <p class="hint">These credentials will be requested when opening the main device page.</p>
+
+    <button class="btn btn-primary spacer" id="saveBtn" type="submit" style="margin-top:18px">Save &amp; Reboot</button>
+    <div class="msg" id="status"></div>
+  </form>
+
+  <p class="foot">After saving, the device connects to the WiFi network you entered above, and the web interface becomes available at the device's IP address on your local network.</p>
+</main>
+
+<script>
+(function(){
+"use strict";
+var webAuthBox=document.getElementById('webAuth');
+var webFields=['webUser','webPass'];
+function syncAuth(){
+  var on=webAuthBox.checked;
+  webFields.forEach(function(id){var el=document.getElementById(id);el.disabled=!on;if(id==='webPass'&&!on)el.value='';});
+}
+webAuthBox.addEventListener('change',syncAuth);
+syncAuth();
+
+var statusEl=document.getElementById('status');
+var saveBtn=document.getElementById('saveBtn');
+function setMsg(type,text){statusEl.className='msg '+type;statusEl.textContent=text;statusEl.classList.add('show')}
+function clearMsg(){statusEl.classList.remove('show')}
+function flagErr(id,on){document.getElementById(id).classList.toggle('error',on)}
+
+document.getElementById('cfgForm').addEventListener('submit',function(e){
+  e.preventDefault();
+  if(saveBtn.disabled)return;
+  saveBtn.disabled=true;saveBtn.classList.add('loading');
+  setMsg('info','Saving…');
+  var payload={
+    name:document.getElementById('name').value.trim(),
+
+    wifi_ssid:document.getElementById('ssid').value.trim(),
+    wifi_pass:document.getElementById('pass').value,
+    mqtt_host:document.getElementById('host').value.trim(),
+    mqtt_port:parseInt(document.getElementById('port').value,10)||1883,
+    mqtt_user:document.getElementById('user').value,
+    mqtt_pass:document.getElementById('mqtt_pass').value,
+    web_user:document.getElementById('webUser').value.trim(),
+    web_pass:document.getElementById('webPass').value,
+    web_auth_enabled:webAuthBox.checked?1:0
+  };
+  flagErr('host',false);flagErr('ssid',false);
+  if(!payload.wifi_ssid){flagErr('ssid',true);setMsg('error','WiFi network name is required.');saveBtn.disabled=false;saveBtn.classList.remove('loading');return}
+  if(!payload.mqtt_host){flagErr('host',true);setMsg('error','MQTT broker host is required.');saveBtn.disabled=false;saveBtn.classList.remove('loading');return}
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
+    return r.text().then(function(t){return {ok:r.ok,text:t}});
+  }).then(function(res){
+    if(res.ok){setMsg('success','Saved! Rebooting…');setTimeout(function(){window.location='/'},5000)}
+    else{setMsg('error',res.text||'Save failed.');saveBtn.disabled=false;saveBtn.classList.remove('loading')}
+  }).catch(function(){
+    setMsg('error','Cannot reach the device.');saveBtn.disabled=false;saveBtn.classList.remove('loading');
+  });
+});
+})();
+</script>
+</body>
+</html>)cfg";
 
 // ============================================================
 //                      HTML (Working mode / STA, OTA)
 // ============================================================
 static const char HTML_OTA[] PROGMEM =
-"<!DOCTYPE html>"
-"<html lang=\"en\"><head>"
-"<meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-"<title>SmartSpray OTA</title>"
-"<style>"
-"*{box-sizing:border-box;margin:0;padding:0}"
-"body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#1a1a2e;color:#eee;min-height:100vh;display:flex;align-items:center;justify-content:center}"
-".card{background:#16213e;padding:40px;border-radius:16px;width:90%;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,0.3)}"
-"h1{font-size:22px;margin-bottom:8px;color:#0f3460}"
-".subtitle{font-size:14px;color:#888;margin-bottom:24px}"
-".statusbar{display:flex;gap:12px;margin-bottom:20px;font-size:13px}"
-".pill{flex:1;padding:8px;border-radius:8px;text-align:center;background:#1a1a2e;border:1px solid #333}"
-".pill.ok{color:#4ecca3;border-color:#4ecca3}"
-".pill.bad{color:#e94560;border-color:#e94560}"
-".drop-zone{border:2px dashed #0f3460;border-radius:12px;padding:40px 20px;text-align:center;cursor:pointer}"
-".drop-zone:hover,.drop-zone.dragover{border-color:#e94560;background:rgba(233,69,96,0.05)}"
-".drop-zone.has-file{border-color:#4ecca3;background:rgba(78,204,163,0.05)}"
-".drop-zone-icon{font-size:40px;margin-bottom:12px;color:#0f3460}"
-".drop-zone-text{font-size:14px;color:#888}"
-".drop-zone-text span{color:#e94560;text-decoration:underline}"
-".file-name{font-size:13px;color:#4ecca3;margin-top:8px;display:none}"
-".btn{width:100%;padding:14px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:16px}"
-".btn:disabled{background:#555;color:#888;cursor:not-allowed}"
-".btn-primary{background:#e94560;color:#fff}"
-".btn-primary:disabled{background:#555;cursor:not-allowed}"
-".btn-spray{background:#4ecca3;color:#123}"
-".btn-check{background:#333;color:#eee;font-size:14px;margin-bottom:24px}"
-".btn-reset{background:#333;color:#888;margin-top:8px;font-size:13px}"
-".status{margin-top:16px;padding:12px;border-radius:8px;font-size:14px;display:none}"
-".status.info{display:block;background:rgba(15,52,96,0.3);color:#4fc3f7}"
-".status.success{display:block;background:rgba(78,204,163,0.15);color:#4ecca3}"
-".status.error{display:block;background:rgba(233,69,96,0.15);color:#e94560}"
-".ip-info{font-size:12px;color:#555;margin-top:20px;text-align:center}"
-".sep{margin:20px 0;border:0;border-top:1px solid #333}"
-".motor{margin-top:20px}"
-".motor label.caption{display:block;font-size:12px;color:#888;line-height:1.5;margin-bottom:12px}"
-".motor input[type=range]{width:100%;accent-color:#4ecca3;cursor:pointer}"
-".power-row{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#888;margin-top:4px}"
-".pill-sm{display:inline-block;padding:2px 8px;border-radius:6px;font-size:12px;background:#1a1a2e;border:1px solid #333}"
-".pill-sm.ok{color:#4ecca3;border-color:#4ecca3}"
-".pill-sm.bad{color:#e94560;border-color:#e94560}"
-".btn-save{background:#4ecca3;color:#123}"
-".btn-update{background:#4ecca3;color:#123}"
-".upd-row{display:flex;gap:8px}"
-".upd-row .btn{margin-top:0;flex:1}"
-".switch-row{display:flex;align-items:center;gap:10px;font-size:14px;color:#eee;margin:18px 0 4px;cursor:pointer}"
-".switch-row input{width:18px;height:18px;accent-color:#4ecca3;cursor:pointer}"
-".switch-row span.note{color:#888;font-size:12px}"
-".log-wrap{margin-top:20px}"
-".log-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}"
-".log-head span{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px}"
-".log-clear{background:none;border:1px solid #333;color:#888;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}"
-".log-clear:hover{color:#eee;border-color:#e94560}"
-"#logBox{background:#0f0f23;border:1px solid #333;border-radius:8px;padding:10px;height:200px;overflow-y:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;color:#9fe8cf;white-space:pre-wrap;word-break:break-word}"
-"</style></head><body>"
-"<div class=\"card\">"
-"<h1 id=\"devName\">SmartSpray</h1>"
-"<div class=\"subtitle\">Firmware v" FW_VERSION "</div>"
-"<div class=\"statusbar\">"
-"<div class=\"pill\" id=\"stWifi\">WiFi …</div>"
-"<div class=\"pill\" id=\"stMqtt\">MQTT …</div>"
-"</div>"
-"<button class=\"btn btn-spray\" onclick=\"sprayNow()\">&#x1F4A6; Spray</button>"
-"<div class=\"motor\">"
-"<label class=\"caption\">Motor speed (spray force). Tune it by trial: every air freshener has its own play in the mechanism. Find the lowest value that still has enough power to spray. Default is 188.</label>"
-"<input type=\"range\" id=\"motorPower\" min=\"20\" max=\"255\" step=\"1\" oninput=\"document.getElementById('motorPowerVal').textContent=this.value\">"
-"<div class=\"power-row\"><span>Spray force: <b id=\"motorPowerVal\"></b> / 255</span><button class=\"btn btn-save\" onclick=\"savePower()\">Save</button></div>"
-"</div>"
-"<hr class=\"sep\">"
-"<button class=\"btn btn-check\" onclick=\"checkUpdate()\">Check for updates</button>"
-"<div class=\"drop-zone\" id=\"dropZone\">"
-"<div class=\"drop-zone-icon\">&#x1F4C1;</div>"
-"<div class=\"drop-zone-text\">Drag & drop .bin file or <span>browse</span></div>"
-"<div class=\"file-name\" id=\"fileName\"></div>"
-"</div>"
-"<input type=\"file\" id=\"fileInput\" accept=\".bin\" style=\"display:none\">"
-"<button class=\"btn btn-update\" id=\"updBtn\" onclick=\"doUpdate()\" disabled>Update</button>"
-"<div class=\"status\" id=\"status\"></div>"
-"<div class=\"log-wrap\">"
-"<div class=\"log-head\"><span>Logs</span><button class=\"log-clear\" onclick=\"clearLogs()\">Clear</button></div>"
-"<div id=\"logBox\"></div>"
-"</div>"
-"<hr class=\"sep\">"
-"<button class=\"btn btn-reset\" onclick=\"resetConfig()\">Reset settings</button>"
-"<div class=\"ip-info\" id=\"ipInfo\"></div>"
-"</div>"
-"<script>"
-"const dropZone=document.getElementById('dropZone');"
-"const fileInput=document.getElementById('fileInput');"
-"const fileName=document.getElementById('fileName');"
-"const status=document.getElementById('status');"
-"const updBtn=document.getElementById('updBtn');"
-"let selectedFile=null;"
-"let updAvailable=false;"
-"let uiInit=false;"
-"function syncUpd(){updBtn.disabled=!(selectedFile||updAvailable)}"
-"function flagUpd(on){updAvailable=on;syncUpd()}"
-"dropZone.addEventListener('click',()=>fileInput.click());"
-"dropZone.addEventListener('dragover',(e)=>{e.preventDefault();dropZone.classList.add('dragover')});"
-"dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('dragover'));"
-"dropZone.addEventListener('drop',(e)=>{e.preventDefault();dropZone.classList.remove('dragover');if(e.dataTransfer.files.length)handleFile(e.dataTransfer.files[0])});"
-"fileInput.addEventListener('change',()=>{if(fileInput.files.length)handleFile(fileInput.files[0])});"
-"function handleFile(file){"
-"if(!file.name.endsWith('.bin')){showStatus('Only .bin files allowed','error');return}"
-"selectedFile=file;fileName.textContent=file.name;fileName.style.display='block';"
-"dropZone.classList.add('has-file');syncUpd()"
-"}"
-"function showStatus(msg,type){status.textContent=msg;status.className='status '+type}"
-"async function sprayNow(){"
-"showStatus('Spraying...','info');"
-"try{const res=await fetch('/api/spray',{method:'POST'});"
-"if(res.ok){showStatus('Spray done!','success')}else{showStatus('Failed','error')}"
-"}catch(e){showStatus('Error: '+e.message,'error')}"
-"}"
-"async function checkUpdate(){"
-"showStatus('Checking for updates...','info');flagUpd(false);"
-"try{const res=await fetch('/api/check-update',{method:'POST'});const t=await res.text();"
-"if(res.ok&&t.indexOf('AVAILABLE:')===0){"
-"const v=t.slice(10);showStatus('New version '+v+' available. Click «Update».','success');flagUpd(true)"
-"}else if(res.ok){showStatus(t,'success')}"
-"else{showStatus(t,'error')}"
-"}catch(e){showStatus('Error: '+e.message,'error')}"
-"}"
-"async function doUpdate(){"
-"try{"
-"if(selectedFile){"
-"showStatus('Uploading firmware...','info');"
-"const fd=new FormData();fd.append('firmware',selectedFile,selectedFile.name);"
-"const res=await fetch('/update',{method:'POST',body:fd});"
-"if(res.ok){showStatus('Success! Rebooting...','success');setTimeout(()=>window.location.reload(),5000)}"
-"else{const t=await res.text();showStatus('Error: '+t,'error')}"
-"return"
-"}"
-"if(updAvailable){"
-"if(!confirm('Install the firmware update?'))return;"
-"showStatus('Installing update...','info');flagUpd(false);"
-"const res=await fetch('/api/update',{method:'POST'});const t=await res.text();"
-"if(res.ok){showStatus(t,'success');setTimeout(()=>window.location.reload(),5000)}else{showStatus(t,'error')}"
-"return"
-"}"
-"showStatus('No firmware to install','error')"
-"}catch(e){showStatus('Error: '+e.message,'error')}"
-"}"
-"function savePower(){"
-"const p=parseInt(document.getElementById('motorPower').value);"
-"showStatus('Saving spray force...','info');"
-"fetch('/api/power',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({power:p})}).then(r=>{"
-"if(r.ok){showStatus('Spray force: '+p+' / 255','success');document.getElementById('motorPowerVal').textContent=p}else{showStatus('Save failed','error')}"
-"}).catch(()=>showStatus('Save failed','error'))"
-"}"
-"async function resetConfig(){"
-"if(!confirm('Reset all settings and reboot to setup mode?'))return;"
-"showStatus('Resetting...','info');"
-"try{const res=await fetch('/api/reset-config',{method:'POST'});"
-"if(res.ok){showStatus('Rebooting to setup mode...','success');setTimeout(()=>window.location.reload(),5000)}"
-"else{showStatus('Reset failed','error')}"
-"}catch(e){showStatus('Error: '+e.message,'error')}"
-"}"
-"fetch('/api/ip').then(r=>r.text()).then(ip=>{document.getElementById('ipInfo').textContent='Device IP: '+ip+' | FW v" FW_VERSION "'}).catch(()=>{});"
-"function refreshStatus(){"
-"fetch('/api/status').then(r=>r.json()).then(s=>{"
-"const w=document.getElementById('stWifi');w.textContent='WiFi '+(s.wifi?'✓':'✗');w.className='pill '+(s.wifi?'ok':'bad');"
-"const m=document.getElementById('stMqtt');m.textContent='MQTT '+(s.mqtt?'✓':'✗');m.className='pill '+(s.mqtt?'ok':'bad');"
-"if(s.upd){flagUpd(true)}"
-"if(s.id){"
-"document.getElementById('ipInfo').textContent=s.ip+' | Device ID: '+s.id+' | FW v" FW_VERSION "'"
-"}"
-"if(!uiInit){"
-"document.getElementById('motorPower').value=s.power;document.getElementById('motorPowerVal').textContent=s.power;uiInit=true"
-"}"
-"}).catch(()=>{})"
-"}"
-"setInterval(refreshStatus,5000);refreshStatus();"
-"let lastLog='';"
-"function refreshLogs(){"
-"fetch('/api/logs').then(r=>r.text()).then(t=>{"
-"const box=document.getElementById('logBox');"
-"const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<30;"
-"if(t!==lastLog){box.textContent=t;lastLog=t;if(atBottom)box.scrollTop=box.scrollHeight}"
-"}).catch(()=>{})"
-"}"
-"function clearLogs(){fetch('/api/logs/clear',{method:'POST'});document.getElementById('logBox').textContent='';lastLog=''}"
-"setInterval(refreshLogs,3000);refreshLogs()"
-"</script></body></html>";
+R"ota(<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101419">
+<title>SmartSpray OTA</title>
+<style>
+:root{
+  --bg:#101419;--srf:#161c24;--srf2:#1b222d;--srf3:#232b39;
+  --brd:#2a3542;--brd2:#3a4757;
+  --tx:#e7ecf3;--tx2:#9fadbd;--tx3:#7d8b9c;
+  --acc:#6d8cff;--acc2:#8ba5ff;
+  --ok:#43d69a;--warn:#f2b544;--err:#f5646c;
+  --r:12px;--r2:10px;--r3:8px;
+  --sh:0 12px 34px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--bg);color:var(--tx);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh}
+.wrap{max-width:560px;margin:0 auto;padding:26px 14px 60px}
+.app-head{margin:8px 0 18px}
+.app-head h1{font-size:23px;font-weight:700;letter-spacing:-.01em}
+.subtitle{font-size:13px;color:var(--tx2);margin-top:2px}
+.pills{display:flex;gap:10px;margin-top:14px}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;font-size:12px;font-weight:600;background:var(--srf2);border:1px solid var(--brd);color:var(--tx2);transition:color .15s,border-color .15s}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--tx3);transition:background .15s}
+.pill.ok{color:var(--ok);border-color:var(--ok)}
+.pill.bad{color:var(--err);border-color:var(--err)}
+.pill.warn{color:var(--warn);border-color:var(--warn)}
+.pill.ok .dot,.pill.bad .dot,.pill.warn .dot{background:currentColor}
+.card{background:var(--srf);border:1px solid var(--brd);border-radius:var(--r);box-shadow:var(--sh);padding:20px}
+.card+.card{margin-top:16px}
+.card-title{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;letter-spacing:.02em;margin-bottom:14px}
+.card-title svg{flex:none;opacity:.85}
+.hint{font-size:12.5px;color:var(--tx2);line-height:1.55;margin-top:10px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:44px;padding:0 16px;border:1px solid transparent;border-radius:var(--r2);font-family:inherit;font-size:15px;font-weight:600;letter-spacing:.01em;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s,color .15s,transform .05s,opacity .15s;-webkit-tap-highlight-color:transparent}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible{outline:2px solid rgba(109,140,255,.6);outline-offset:2px}
+.btn:disabled{cursor:not-allowed;opacity:.45;transform:none}
+.btn-primary{background:#fff;color:#0d1117}
+.btn-primary:hover:not(:disabled){background:#e9eef6}
+.btn-outline{background:var(--srf2);border-color:var(--brd2);color:var(--tx)}
+.btn-outline:hover:not(:disabled){border-color:var(--acc);color:#fff}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--tx2);width:auto;min-height:auto;padding:6px 10px;font-size:13px;font-weight:600;border-radius:var(--r3)}
+.btn-ghost:hover:not(:disabled){color:var(--tx);background:var(--srf3)}
+.btn-danger{background:transparent;border-color:rgba(245,100,108,.4);color:var(--err)}
+.btn-danger:hover:not(:disabled){background:rgba(245,100,108,.12);border-color:var(--err)}
+.btn svg{flex:none}
+.btn.loading{pointer-events:none}
+.btn.loading::after{content:"";width:15px;height:15px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;display:inline-block;vertical-align:-2px;animation:rot .7s linear infinite;margin-left:8px;opacity:.9}
+@keyframes rot{to{transform:rotate(360deg)}}
+.toast-wrap{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;gap:8px;width:min(92vw,420px);pointer-events:none}
+.toast{display:flex;align-items:flex-start;gap:10px;background:var(--srf);border:1px solid var(--brd2);border-left:3px solid var(--acc);border-radius:var(--r3);box-shadow:var(--sh);padding:11px 13px;font-size:13px;color:var(--tx);line-height:1.45;opacity:0;transform:translateY(-6px);transition:opacity .18s,transform .18s}
+.toast.show{opacity:1;transform:none}
+.toast::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--acc);flex:none;margin-top:5px}
+.toast.success::before{background:var(--ok)}
+.toast.error::before{background:var(--err)}
+.toast.warn::before{background:var(--warn)}
+.state-bar{display:none;align-items:center;justify-content:center;gap:9px;background:rgba(109,140,255,.12);color:#b8c6ff;border:1px solid rgba(109,140,255,.4);border-radius:var(--r3);padding:12px 14px;font-size:13px;font-weight:600;margin-bottom:16px;text-align:center}
+.state-bar.show{display:flex}
+.state-bar .spin{width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:rot .7s linear infinite;flex:none}
+.offline{display:none;background:rgba(245,100,108,.12);color:#ffb4b9;border:1px solid rgba(245,100,108,.4);border-radius:var(--r3);padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:16px;text-align:center}
+.offline.show{display:block}
+.label{display:block;font-size:12.5px;font-weight:600;color:var(--tx2);margin-bottom:6px;letter-spacing:.02em}
+.value-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:4px}
+.value-row .val{font-size:13px;color:var(--tx2)}
+.value-row .val b{color:var(--tx)}
+.pwr{font-size:12px;font-weight:600;color:var(--tx3);min-height:1em}
+.pwr.busy{color:var(--warn)}
+.pwr.ok{color:var(--ok)}
+.range{width:100%;-webkit-appearance:none;appearance:none;height:6px;border-radius:999px;background:var(--srf3);outline:none;margin:14px 0 8px;cursor:pointer}
+.range::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:#fff;border:2px solid var(--acc);box-shadow:0 2px 6px rgba(0,0,0,.4);cursor:pointer}
+.range::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid var(--acc);box-shadow:0 2px 6px rgba(0,0,0,.4);cursor:pointer}
+.range-row{display:flex;align-items:center;gap:12px}
+.range-row .range{flex:1;min-width:0;width:auto}
+.stepper{display:flex;gap:6px;flex:none}
+.btn-step{width:42px;height:42px;border-radius:var(--r3);background:var(--srf2);border:1px solid var(--brd2);color:var(--tx);font-size:19px;font-weight:600;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:background .15s,border-color .15s,color .15s,transform .05s;-webkit-tap-highlight-color:transparent}
+.btn-step:hover:not(:disabled){border-color:var(--acc);color:#fff}
+.btn-step:active:not(:disabled){transform:translateY(1px)}
+.btn-step:disabled{opacity:.45;cursor:not-allowed}
+.btn-step:focus-visible{outline:2px solid rgba(109,140,255,.6);outline-offset:2px}
+.or-divider{display:flex;align-items:center;gap:12px;margin:20px 0;color:var(--tx3);font-size:11.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;user-select:none}
+.or-divider::before,.or-divider::after{content:"";flex:1;height:1px;background:var(--brd2)}
+.drop{padding:22px 16px;border:2px dashed var(--brd2);border-radius:var(--r2);background:var(--srf2);text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--acc);background:rgba(109,140,255,.06)}
+.drop.has-file{border-color:var(--ok);background:rgba(67,214,154,.06)}
+.drop svg{width:32px;height:32px;color:var(--tx3);margin-bottom:8px}
+.drop p{font-size:13.5px;color:var(--tx2)}
+.drop p b{color:var(--acc)}
+.drop .fname{display:none;margin-top:8px;font-size:13px;color:var(--ok);font-weight:600;word-break:break-all;align-items:center;justify-content:center;gap:8px}
+.drop.has-file .fname{display:flex}
+.drop .fname button{background:none;border:none;color:var(--ok);font-size:15px;cursor:pointer;line-height:1;padding:2px 4px}
+.drop .fname button:hover{color:#fff}
+.spacer{margin-top:16px}
+.logbox{background:#0a0d11;border:1px solid var(--brd);border-radius:var(--r3);padding:12px;height:200px;overflow-y:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;color:#a5e8c9;white-space:pre-wrap;word-break:break-word}
+.log-empty{color:var(--tx3);text-align:center;padding:40px 0;font-size:13px}
+.foot{text-align:center;font-size:12.5px;color:var(--tx3);margin-top:22px;line-height:1.7}
+.modal-bg{position:fixed;inset:0;background:rgba(5,8,12,.65);display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+.modal-bg.open{display:flex}
+.modal{width:100%;max-width:400px;background:var(--srf);border:1px solid var(--brd2);border-radius:var(--r);box-shadow:var(--sh);padding:22px}
+.modal h3{font-size:16px;font-weight:700;margin-bottom:8px}
+.modal p{font-size:14px;color:var(--tx2);margin-bottom:20px;line-height:1.55}
+.modal .mbtns{display:flex;gap:10px}
+.modal .mbtns .btn{margin:0}
+@media(max-width:520px){
+.wrap{padding:16px 10px 40px}
+.card{padding:16px}
+.btn{min-height:48px}
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="app-head">
+    <h1 id="devName">SmartSpray</h1>
+    <div class="subtitle">Firmware v)ota"
+FW_VERSION
+R"ota(</div>
+    <div class="pills">
+      <span class="pill" id="stWifi"><span class="dot"></span><span class="pl">WiFi · …</span></span>
+      <span class="pill" id="stMqtt"><span class="dot"></span><span class="pl">MQTT · …</span></span>
+    </div>
+  </header>
+
+  <div class="state-bar" id="stateBar"></div>
+  <div class="offline" id="offlineBox">Connection to the device lost — waiting for it to come back…</div>
+
+  <section class="card">
+    <div class="card-title"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>Spray</div>
+    <button class="btn btn-primary" id="sprayBtn" type="button">Spray</button>
+    <div class="spacer"></div>
+    <label class="label" for="motorPower">Spray force</label>
+    <div class="range-row">
+      <input type="range" class="range" id="motorPower" min="20" max="255" step="1">
+      <span class="stepper">
+        <button type="button" class="btn-step" id="powMinus" aria-label="Decrease spray force">−</button>
+        <button type="button" class="btn-step" id="powPlus" aria-label="Increase spray force">+</button>
+      </span>
+    </div>
+    <div class="value-row">
+      <span class="val"><b id="motorPowerVal">–</b> / 255</span>
+      <span class="pwr" id="pwrState"></span>
+    </div>
+    <p class="hint">Auto-saves while you drag. Find the lowest value that still sprays reliably — every freshener has its own play. Default is 188.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>Firmware update</div>
+    <button class="btn btn-outline" id="chkBtn" type="button">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.17-.02-2.12-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.26.72-1.55-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 2.87-.39c.97 0 1.95.13 2.87.39 2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.73.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14 0 1.55-.01 2.8-.01 3.18 0 .31.21.67.8.56A11.52 11.52 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+      Check GitHub for updates
+    </button>
+    <div class="or-divider">OR</div>
+    <div class="drop" id="dropZone" role="button" tabindex="0" aria-label="Upload .bin firmware">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M7 9l5-5 5 5"/><path d="M12 4v12"/></svg>
+      <p>Drag &amp; drop a <b>.bin</b> file here, or <b>browse</b></p>
+      <div class="fname" id="fileName"><span class="fn"></span><button type="button" id="fileClear" aria-label="Remove file">&times;</button></div>
+    </div>
+    <input type="file" id="fileInput" accept=".bin" hidden>
+    <button class="btn btn-primary spacer" id="updBtn" type="button" disabled>Update</button>
+    <p class="hint" id="updHint">Check GitHub for the latest release, or upload a .bin to install it manually.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg>Logs<button class="btn btn-ghost" id="logClear" type="button" style="margin-left:auto">Clear</button></div>
+    <div class="logbox" id="logBox"><div class="log-empty">No logs yet</div></div>
+    <p class="hint">Live diagnostics from the device. Refreshes automatically.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Maintenance</div>
+    <button class="btn btn-danger" id="resetBtn" type="button">Reset settings</button>
+    <p class="hint">Erase WiFi, MQTT and web credentials, then restart into the setup access point.</p>
+  </section>
+
+  <p class="foot">Device <span id="ipInfo">…</span></p>
+</main>
+
+<div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="modalTitle">Are you sure?</h3>
+    <p id="modalBody"></p>
+    <div class="mbtns">
+      <button class="btn btn-ghost" id="modalCancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="modalOk" type="button">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+var $=function(id){return document.getElementById(id)};
+var stWifi=$('stWifi'),stMqtt=$('stMqtt');
+var sprayBtn=$('sprayBtn');
+var motorPower=$('motorPower'),motorPowerVal=$('motorPowerVal'),pwrState=$('pwrState'),powMinus=$('powMinus'),powPlus=$('powPlus');
+var chkBtn=$('chkBtn'),updBtn=$('updBtn'),updHint=$('updHint');
+var dropZone=$('dropZone'),fileInput=$('fileInput'),fileName=$('fileName'),fileClear=$('fileClear');
+var logBox=$('logBox'),logClear=$('logClear');
+var resetBtn=$('resetBtn'),ipInfo=$('ipInfo'),offlineBox=$('offlineBox'),stateBar=$('stateBar');
+var modalBg=$('modalBg'),modalTitle=$('modalTitle'),modalBody=$('modalBody'),modalOk=$('modalOk'),modalCancel=$('modalCancel');
+var toastWrap=$('toastWrap');
+var selectedFile=null,updAvailable=false,availVersion='',uiInit=false,offline=0,rebooting=false,lastLog='',modalResolve=null;
+var lastSaved=null,saveTimer=null,op=null;
+
+function clearToasts(){
+  while(toastWrap.firstChild) toastWrap.removeChild(toastWrap.firstChild);
+  op=null;
+}
+function toast(type,text){
+  clearToasts();
+  var el=document.createElement('div');
+  el.className='toast '+type;el.textContent=text;
+  toastWrap.appendChild(el);
+  el.classList.add('show');
+  scheduleClose(el,type);
+  return el;
+}
+function scheduleClose(el,type){
+  clearTimeout(el._t);
+  var dur={info:3600,success:3600,error:4500,warn:4000}[type]||3600;
+  el._t=setTimeout(function(){
+    if(el.isConnected) el.remove();
+  },dur);
+}
+function opShow(type,text){
+  // In-progress toast: no auto-close timer; stays until the operation ends.
+  if(op&&op.isConnected){op.className='toast '+type;op.textContent=text}
+  else{
+    clearToasts();
+    op=document.createElement('div');
+    op.className='toast '+type;op.textContent=text;
+    toastWrap.appendChild(op);
+    op.classList.add('show');
+  }
+}
+function opResult(type,text){
+  // Deterministic result: close the progress toast, show a brand-new toast with
+  // its own full timer, so a result can never be cleared by a stale timer.
+  closeOp();
+  toast(type,text);
+}
+function closeOp(){
+  if(op&&op.isConnected) op.remove();
+  op=null;
+}
+function setLoading(btn,on){
+  btn.classList.toggle('loading',on);
+  btn.disabled=on?true:(rebooting?true:false);
+}
+function syncUpd(){
+  if(rebooting)return;
+  if(selectedFile){
+    updBtn.disabled=false;
+    updBtn.textContent='Update';
+    updHint.textContent='Ready to upload '+selectedFile.name+'.';
+  }
+  else if(updAvailable){
+    updBtn.disabled=false;
+    updBtn.textContent=availVersion?('Update to '+availVersion):'Update available';
+    updHint.textContent=availVersion?('Version '+availVersion+' is ready to install.'):'An update is ready to install.';
+  }
+  else{
+    updBtn.disabled=true;
+    updBtn.textContent='Update';
+    updHint.textContent='Check GitHub for the latest release, or upload a .bin to install it manually.';
+  }
+}
+function setPill(pill,state,label){pill.className='pill '+state;pill.querySelector('.pl').textContent=label}
+
+sprayBtn.addEventListener('click',function(){
+  setLoading(sprayBtn,true);opShow('info','Spraying…');
+  fetch('/api/spray',{method:'POST'}).then(function(r){
+    setLoading(sprayBtn,false);
+    opResult(r.ok?'success':'error',r.ok?'Spray sent.':'Spray failed.');
+  }).catch(function(){setLoading(sprayBtn,false);opResult('error','Cannot reach the device.')});
+});
+
+function clampPower(v){return Math.max(20,Math.min(255,v))}
+function syncStepBtns(){
+  powMinus.disabled=parseInt(motorPower.value,10)<=20;
+  powPlus.disabled=parseInt(motorPower.value,10)>=255;
+}
+function applyPower(v){
+  var p=clampPower(v);
+  motorPower.value=p;
+  motorPowerVal.textContent=p;
+  syncStepBtns();
+  pwrState.className='pwr';pwrState.textContent='';
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(savePower,1000);
+}
+motorPower.addEventListener('input',function(){applyPower(parseInt(motorPower.value,10))});
+powMinus.addEventListener('click',function(){applyPower(parseInt(motorPower.value,10)-1)});
+powPlus.addEventListener('click',function(){applyPower(parseInt(motorPower.value,10)+1)});
+function savePower(){
+  clearTimeout(saveTimer);
+  var p=parseInt(motorPower.value,10);
+  pwrState.className='pwr busy';pwrState.textContent='Saving…';
+  fetch('/api/power',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({power:p})}).then(function(r){
+    if(r.ok){
+      lastSaved=p;
+      pwrState.className='pwr ok';pwrState.textContent='Saved';
+      setTimeout(function(){if(pwrState.textContent==='Saved'){pwrState.className='pwr';pwrState.textContent=''}},1800);
+    }else{saveFail()}
+  }).catch(function(){saveFail()});
+}
+function saveFail(){
+  pwrState.className='pwr';pwrState.textContent='';
+  if(lastSaved!==null){motorPower.value=lastSaved;motorPowerVal.textContent=lastSaved;syncStepBtns()}
+  opResult('error','Could not save the spray force.');
+}
+
+chkBtn.addEventListener('click',function(){
+  setLoading(chkBtn,true);opShow('info','Checking GitHub…');
+  fetch('/api/check-update',{method:'POST'}).then(function(r){return r.text()}).then(function(t){
+    setLoading(chkBtn,false);
+    if(t.indexOf('AVAILABLE:')===0){availVersion=t.slice(10);updAvailable=true;opResult('success','Update '+availVersion+' is available.')}
+    else if(t.indexOf('NO UPDATE')===0){updAvailable=false;availVersion='';opResult('success','You have the latest version.')}
+    else{opResult('error',t||'Check failed.')}
+    syncUpd();
+  }).catch(function(){setLoading(chkBtn,false);opResult('error','Cannot reach the device.')});
+});
+
+updBtn.addEventListener('click',function(){
+  if(rebooting)return;
+  if(selectedFile){uploadFile();return}
+  if(updAvailable){
+    uiConfirm({title:'Install firmware',body:availVersion?('Install version '+availVersion+' from GitHub? The device will reboot after installing.'):'Install the available update from GitHub? The device will reboot after installing.',ok:'Install'}).then(function(ok){
+      if(!ok)return;
+      setLoading(updBtn,true);opShow('info','Starting update…');
+      fetch('/api/update',{method:'POST'}).then(function(r){return r.text()}).then(function(t){
+        setLoading(updBtn,false);syncUpd();
+        if(t.indexOf('Update started')===0){enterReboot('Update started. Rebooting to install…')}
+        else{opResult('error',t||'Update could not be started.')}
+      }).catch(function(){setLoading(updBtn,false);syncUpd();opResult('error','Cannot reach the device.')});
+    });
+    return;
+  }
+  opResult('warn','Nothing to install yet — run a check or pick a .bin.');
+});
+
+function uploadFile(){
+  setLoading(updBtn,true);opShow('info','Uploading '+selectedFile.name+'…');
+  var fd=new FormData();fd.append('firmware',selectedFile,selectedFile.name);
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/update');
+  xhr.upload.onprogress=function(e){if(e.lengthComputable&&e.total){if(op&&op.isConnected){op.className='toast info';op.textContent='Uploading: '+Math.round(e.loaded/e.total*100)+'%'}}};
+  xhr.onload=function(){
+    setLoading(updBtn,false);syncUpd();
+    if(xhr.status===200){enterReboot('Upload complete. Rebooting…')}
+    else{opResult('error',xhr.responseText||('Upload failed ('+xhr.status+')'))}
+  };
+  xhr.onerror=function(){setLoading(updBtn,false);syncUpd();opResult('error','Upload failed — connection lost.')};
+  xhr.onabort=function(){setLoading(updBtn,false);syncUpd();opResult('error','Upload aborted.')};
+  xhr.send(fd);
+}
+
+function enterReboot(msg){
+  rebooting=true;offlineBox.classList.remove('show');
+  closeOp();
+  stateBar.className='state-bar show';
+  stateBar.innerHTML='<span class="spin"></span><span class="sb-msg"></span>';
+  stateBar.querySelector('.sb-msg').textContent=msg;
+  document.querySelectorAll('.btn').forEach(function(b){b.disabled=true});
+  var tries=0;
+  var t=setInterval(function(){
+    tries++;
+    fetch('/api/status').then(function(r){if(r.ok){clearInterval(t);location.reload()}}).catch(function(){});
+    if(tries===12){stateBar.querySelector('.sb-msg').textContent='Still no response from the device. If it stays offline, power-cycle it — this page will keep trying.'}
+  },5000);
+}
+
+resetBtn.addEventListener('click',function(){
+  uiConfirm({title:'Reset settings',body:'Erase all settings (WiFi, MQTT, web credentials) and restart into setup mode? This cannot be undone.',ok:'Reset',danger:true}).then(function(ok){
+    if(!ok)return;
+    setLoading(resetBtn,true);opShow('info','Resetting…');
+    fetch('/api/reset-config',{method:'POST'}).then(function(r){
+      setLoading(resetBtn,false);
+      if(r.ok){enterReboot('Settings erased. Rebooting to setup…')}
+      else{opResult('error','Reset failed.')}
+    }).catch(function(){setLoading(resetBtn,false);opResult('error','Cannot reach the device.')});
+  });
+});
+
+function handleFile(f){
+  if(!f||!f.name.toLowerCase().endsWith('.bin')){opResult('error','Only .bin files are allowed.');return}
+  selectedFile=f;
+  fileName.querySelector('.fn').textContent=f.name;
+  dropZone.classList.add('has-file');
+  opResult('success','Selected: '+f.name);
+  syncUpd();
+}
+function clearFile(){selectedFile=null;dropZone.classList.remove('has-file');fileName.querySelector('.fn').textContent='';fileInput.value='';opResult('info','File removed.');syncUpd()}
+dropZone.addEventListener('click',function(e){if(e.target.id==='fileClear')return;fileInput.click()});
+fileClear.addEventListener('click',function(e){e.stopPropagation();clearFile()});
+fileInput.addEventListener('change',function(){if(fileInput.files.length)handleFile(fileInput.files[0])});
+dropZone.addEventListener('dragover',function(e){e.preventDefault();dropZone.classList.add('over')});
+dropZone.addEventListener('dragleave',function(){dropZone.classList.remove('over')});
+dropZone.addEventListener('drop',function(e){e.preventDefault();dropZone.classList.remove('over');if(e.dataTransfer.files.length)handleFile(e.dataTransfer.files[0])});
+dropZone.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();fileInput.click()}});
+
+logClear.addEventListener('click',function(){
+  fetch('/api/logs/clear',{method:'POST'}).catch(function(){});
+  lastLog='';
+  renderLogs('');
+  toast('success','Logs cleared.');
+});
+function renderLogs(t){
+  if(t&&t.trim()){logBox.innerHTML='';logBox.textContent=t}
+  else{logBox.innerHTML='';var d=document.createElement('div');d.className='log-empty';d.textContent='No logs yet';logBox.appendChild(d)}
+}
+function refreshLogs(){
+  fetch('/api/logs').then(function(r){return r.text()}).then(function(t){
+    if(t===lastLog)return;
+    lastLog=t;
+    var atBottom=logBox.scrollHeight-logBox.scrollTop-logBox.clientHeight<30;
+    renderLogs(t);
+    if(atBottom)logBox.scrollTop=logBox.scrollHeight;
+  }).catch(function(){});
+}
+
+function refreshStatus(){
+  if(rebooting)return;
+  fetch('/api/status').then(function(r){if(!r.ok)throw new Error('bad');return r.json()}).then(function(s){
+    offline=0;offlineBox.classList.remove('show');
+    setPill(stWifi,s.wifi?'ok':'bad',s.wifi?'WiFi · Online':'WiFi · Offline');
+    setPill(stMqtt,s.mqtt?'ok':'bad',s.mqtt?'MQTT · Online':'MQTT · Offline');
+    if(s.upd&&!updAvailable){updAvailable=true;if(s.uver)availVersion=s.uver;syncUpd()}
+    if(!uiInit){motorPower.value=s.power;motorPowerVal.textContent=s.power;lastSaved=s.power;syncStepBtns();uiInit=true}
+    ipInfo.textContent=(s.ip?'IP '+s.ip+' · ':'')+'ID '+s.id;
+  }).catch(function(){
+    offline++;
+    if(offline>=2){
+      offlineBox.classList.add('show');
+      setPill(stWifi,'warn','WiFi · …');
+      setPill(stMqtt,'warn','MQTT · …');
+    }
+  });
+}
+setInterval(refreshStatus,5000);setInterval(refreshLogs,3000);
+refreshStatus();refreshLogs();
+
+function uiConfirm(opts){
+  return new Promise(function(resolve){
+    modalResolve=resolve;
+    modalTitle.textContent=opts.title||'Are you sure?';
+    modalBody.textContent=opts.body||'';
+    modalOk.textContent=opts.ok||'Confirm';
+    modalBg.classList.add('open');
+    modalOk.focus();
+  });
+}
+function closeModal(v){modalBg.classList.remove('open');if(modalResolve){modalResolve(v);modalResolve=null}}
+modalOk.addEventListener('click',function(){closeModal(true)});
+modalCancel.addEventListener('click',function(){closeModal(false)});
+modalBg.addEventListener('click',function(e){if(e.target===modalBg)closeModal(false)});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal(false)});
+})();
+</script>
+</body>
+</html>)ota";
 
 // ============================================================
 //                       HTTP handlers
@@ -336,6 +687,7 @@ static void wbStatus() {
               + ",\"mqtt\":" + (mqttConnected() ? 1 : 0)
               + ",\"power\":" + motorGetPower()
               + ",\"upd\":" + (updaterAvailable() ? 1 : 0)
+              + ",\"uver\":\"" + updaterLatestVersion() + "\""
               + ",\"version\":\"" FW_VERSION "\""
               + ",\"ip\":\"" + WiFi.localIP().toString() + "\""
               + ",\"id\":\"" + deviceId() + "\"}";

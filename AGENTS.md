@@ -48,16 +48,18 @@ NodeMCU support was removed; the code targets the Wemos D1 Mini.
 
 ## Web / OTA
 
-- **Setup mode (AP):** when no config in EEPROM — access point `SmartSpray Setup`, captive portal, WiFi/MQTT config page at `http://192.168.4.1`
+- Both pages (`HTML_CONFIG` AP, `HTML_OTA` STA) are **raw string literals** `R"cfg(...)cfg"` / `R"ota(...)ota"` in `src/webserver.cpp`. Same dark design-token palette (`:root` CSS vars: `--bg #101419`, `--srf #161c24`, accent `--acc #6d8cff`, ok `#43d69a`, warn `#f2b544`, err `#f5646c`), shared button/message/card styles, responsive (`<=520px`).
+- **Preprocessor macros live OUTSIDE the raw literals** (they don't expand inside `R"..."`): the literals are spliced at each macro point, e.g. `R"cfg(<title>)cfg" AP_SSID R"cfg(</title>)cfg"`. Markers: `AP_SSID` (title), `DEVICE_NAME_DEFAULT` (name field), `FW_VERSION` (OTA subtitle). Keep server-side replace markers `<title>SmartSpray OTA</title>` and `<h1 id="devName">SmartSpray</h1>` intact (`wbOtaPage` swaps in `deviceName()`).
+- **Setup mode (AP):** when no config in EEPROM — access point `SmartSpray Setup`, captive portal, WiFi/MQTT config page at `http://192.168.4.1` (single card: Device name, WiFi, MQTT, "Web Interface Access" switch **"Username and password for the web interface"** that enables/disables the user/pass fields; firmware-update source field was removed — updates always come from GitHub; client-side validation marks `.error` fields; `POST /api/config` then reboots, so `update_url` is always cleared to ""). Footer explains the web UI will be reachable at the device's IP on the local network.
 - **Working mode (STA):** control page at `http://<ip-device>/` (top to bottom):
-  - WiFi/MQTT status (`GET /api/status`), auto-refreshes every 5 s
-  - "Spray" button (`POST /api/spray`)
-  - Spray-force slider + "Save" (`POST /api/power`, JSON `{"power":N}`, min 20 / max 255, default 188)
-  - "Check for updates" button (`POST /api/check-update`)
-  - Drag & drop `.bin` file zone
-  - **Single "Update" button** (`#updBtn`) — gray by default, turns green if **a file is attached OR a GitHub update was found**. Click logic: file selected → multipart upload to `POST /update`; else if update → `POST /api/update`
-  - **Logs** window (`GET /api/logs`, clear `POST /api/logs/clear`) — latest DEBUG messages (ring buffer 40 lines), live-refreshed every 3 s
-  - "Reset settings" button → erase EEPROM and reboot to AP mode
+  - Header: device name, `Firmware v<FW_VERSION>`, WiFi/MQTT status **pills** (with dot, ok/bad) from `GET /api/status`, auto-refreshes every 5 s
+  - Offline banner shown after 2 consecutive failed `/api/status` polls
+  - **"Spray" card**: Spray button (`POST /api/spray`) + force slider with **live value + auto-save** (`POST /api/power`, JSON `{"power":N}`, min 20 / max 255, default 188) and **− / + stepper buttons** (`#powMinus`/`#powPlus`, step 1, disabled at the bounds) right of the slider for precise tuning — no Save button; saving fires on a ~1 s debounce after the last change, with a small inline "Saved" state and a toast on failure
+  - **"Firmware update" card**: "Check GitHub for updates" (`POST /api/check-update`, GitHub octocat icon), an **OR** divider, drag & drop `.bin` zone, and a **single "Update" button** (`#updBtn`). Button text reflects state (after `syncUpd()`): `Update to vX.Y.Z` / `Update available` when a GitHub update was found (`/api/status` also reports it as `upd` + `uver`), plain `Update` when a `.bin` is attached, gray `Update` (disabled) otherwise. Click logic: file → multipart upload to `POST /update` (XHR with progress %); update → confirm modal then `POST /api/update`
+  - **"Logs" card** (`GET /api/logs`, clear `POST /api/logs/clear`), live-refreshed every 3 s, empty-state text
+  - **"Maintenance" card**: "Reset settings" (danger style, confirm modal) → erase EEPROM and reboot to AP mode
+  - Footer: `IP <ip> · ID <device_id>`
+- **Notifications:** transient feedback uses **toasts** (top-center in `#toastWrap`; a **single slot** — every new toast instantly clears all previous ones and appears in the same fixed spot, so the stack never grows; auto-dismiss: info/success ~3.6 s, warn ~4 s, error ~4.5 s; no fade-away, removal is instant). An in-flight toast (`opShow`, no auto-close) sticks while an operation runs; `opResult` closes it and shows a **fresh** toast with its own full timer, so a result can never be cleared by a stale timer. Toasts replace per-card message boxes. Long reboot flows (upload/update/reset) switch into `enterReboot()`: a persistent **state bar** (`#stateBar`, spinner) shows the reason, all buttons disable, and the page polls `/api/status` every 5 s and auto-reloads when the device is back.
 - **Web auth:** all STA endpoints + the `/update` upload handler are gated by HTTP Basic auth when enabled (`web_auth_enabled`). Auth check happens BEFORE `Update.begin()`. Default off. Configured on the AP setup page (username + password ≥ 4 chars).
 
 ## OTA upload: important nuance (long-suffered fix)
@@ -69,8 +71,8 @@ NodeMCU support was removed; the code targets the Wemos D1 Mini.
 
 - **Config exists, but WiFi unavailable** (router boots slower than the device) → AP fallback: `SmartSpray Setup` is brought up (WIFI_AP_STA mode), every `WIFI_RETRY_MS` (30 s) the airwaves are scanned (`WiFi.scanNetworks()`) for the configured SSID; once found — connect and return to working mode. If network found but connect fails (e.g. wrong password) — after `WIFI_RETRY_MAX_FAILURES` (3) attempts give up, disable STA and stay on AP config; counter resets on reboot/re-config
 - **No config** → pure AP setup mode (no scanning)
-- **MQTT unavailable** → non-blocking reconnect (`mqttLoop()` at most once per 5 s, doesn't block webLoop); web page always responds
-- Parameters in `include/config.h`: `WIFI_CONNECT_TIMEOUT_MS`, `WIFI_RETRY_MS`
+- **MQTT unavailable** → reconnect is bounded and spaced out: `MQTT_RECONNECT_INTERVAL_MS` (20 s) between attempts, each attempt capped by `MQTT_CONNECT_TIMEOUT_MS` (3 s, DNS + TCP via `espClient.setTimeout()` + CONNACK via `PubSubClient::setSocketTimeout()`), so the loop — and the web page — never stalls when the broker is unreachable
+- Parameters in `include/config.h`: `WIFI_CONNECT_TIMEOUT_MS`, `WIFI_RETRY_MS`, `MQTT_CONNECT_TIMEOUT_MS`, `MQTT_RECONNECT_INTERVAL_MS`
 
 ## GitHub auto-update (check + download straight from GitHub over TLS)
 
@@ -99,7 +101,7 @@ NodeMCU support was removed; the code targets the Wemos D1 Mini.
 - `availability` — LWT online/offline
 - `version` — retained, current version (HA sensor)
 - `update_available` — retained, `true`/`false` (HA binary sensor)
-- HA Discovery (5 entities in one device): `homeassistant/button/..._trigger/config` (Spraying → SPRAY), `homeassistant/button/..._check/config` (Check updates → CHECK), `homeassistant/button/..._update/config` (Update → UPDATE, published only when an update is found), `homeassistant/sensor/..._version/config`, `homeassistant/binary_sensor/..._update_available/config`
+- HA Discovery (5 entities in one device): `homeassistant/button/..._trigger/config` (Spraying → SPRAY), `homeassistant/button/..._check/config` (Check updates → CHECK), `homeassistant/button/..._update/config` (Update → UPDATE, published only when an update is found; its `name` is built at publish time as `Update to vX.Y.Z` from `updaterLatestVersion()`), `homeassistant/sensor/..._version/config`, `homeassistant/binary_sensor/..._update_available/config`
 
 ## Material
 

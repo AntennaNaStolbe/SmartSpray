@@ -18,17 +18,26 @@ static char mqtt_topic_update_avail[128];
 static char mqtt_discovery_topic[MQTT_ENTITY_COUNT][96];
 static char mqtt_discovery_payload[MQTT_ENTITY_COUNT][512];
 
+// JSON fragments reused to build discovery payloads (set in mqttBegin).
+static String mqttAvailJson;
+static String mqttDevJson;
+
 static WiFiClient espClient;
 static PubSubClient client(espClient);
 
 static AppSettings mqttCfg;
 
-// Min interval between MQTT connection attempts (non-blocking for loop)
-#define MQTT_RECONNECT_INTERVAL_MS  5000
+// Min interval between MQTT connection attempts (defined in config.h; also
+// bounded per-attempt by MQTT_CONNECT_TIMEOUT_MS so the loop never stalls long).
 static unsigned long mqttLastAttempt = 0;
 
 static bool mqttTryConnect() {
   DEBUG_PRINTLN("[MQTT] Connecting...");
+
+  // Bound the whole attempt so an unreachable broker can't stall the main loop:
+  // setTimeout caps DNS lookup + TCP connect, setSocketTimeout caps the CONNACK wait.
+  espClient.setTimeout(MQTT_CONNECT_TIMEOUT_MS);
+  client.setSocketTimeout(MQTT_CONNECT_TIMEOUT_MS / 1000);
 
   if (client.connect(
         deviceId().c_str(),           // client_id (stable MAC-based ID)
@@ -74,6 +83,7 @@ static void mqttPublishStatus() {
 }
 
 // Publish version/update availability and show or hide the Update button.
+// The button name carries the target version (mirrors the web "Update to vX.Y.Z").
 void mqttPublishDeviceInfo() {
   if (!client.connected()) return;
   client.publish(mqtt_topic_version, FW_VERSION, true);
@@ -81,7 +91,14 @@ void mqttPublishDeviceInfo() {
                  updaterAvailable() ? "true" : "false", true);
   // Update button is visible only when an update is found; otherwise remove it (empty retained).
   if (updaterAvailable()) {
-    client.publish(mqtt_discovery_topic[4], mqtt_discovery_payload[4], true);
+    String ver = updaterLatestVersion();
+    String name = ver.isEmpty() ? String("Update") : String("Update to ") + ver;
+    String payload = String("{") + "\"name\":\"" + name + "\","
+      + "\"unique_id\":\"SmartSpray_" + deviceId() + "_update\","
+      + "\"command_topic\":\"" + String(mqtt_topic_command)
+      + "\",\"payload_press\":\"UPDATE\","
+      + mqttAvailJson + "\"icon\":\"mdi:update\"," + mqttDevJson + "}";
+    client.publish(mqtt_discovery_topic[4], payload.c_str(), true);
   } else {
     client.publish(mqtt_discovery_topic[4], "", true);
   }
@@ -136,6 +153,8 @@ void mqttBegin(const AppSettings &s) {
              + "}";
   String avail = String("\"availability_topic\":\"") + base + "/availability"
                + "\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",";
+  mqttAvailJson = avail;
+  mqttDevJson = dev;
 
   String topics[MQTT_ENTITY_COUNT];
   String payloads[MQTT_ENTITY_COUNT];
@@ -169,7 +188,9 @@ void mqttBegin(const AppSettings &s) {
     + "\"payload_on\":\"true\",\"payload_off\":\"false\","
     + avail + "\"device_class\":\"update\"," + dev + "}";
 
-  // 4: "Update" button -> UPDATE (conditional: published only when an update is found)
+  // 4: "Update" button -> UPDATE (conditional: published only when an update is
+  // found; the name is set at publish time with the target version. The static
+  // base payload below defines the fallback structure).
   topics[4] = String("homeassistant/button/SmartSpray_") + id + "_update/config";
   payloads[4] = String("{") + "\"name\":\"Update\","
     + "\"unique_id\":\"SmartSpray_" + id + "_update\","
